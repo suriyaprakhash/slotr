@@ -41,13 +41,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     public func setupMainWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 840, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.center()
-        window.title = "Slotr — Window Manager & 8 Layout Slots"
+        window.title = "Slotr — Window Manager, Desktops & 8 Layout Slots"
         window.contentViewController = NSHostingController(rootView: MainDashboardView())
         window.isReleasedWhenClosed = false
         window.delegate = self
