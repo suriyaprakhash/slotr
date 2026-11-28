@@ -1,113 +1,68 @@
-# Slotr ◧
+# Slotr
 
-**Slotr** is a high-performance native macOS app that brings intelligent window snapping and unlimited instant-recall workspace layouts to your Mac.
+Slotr is a native macOS app for snapping windows and saving unlimited desktop workspace layouts. It is built with Swift, SwiftUI, AppKit, and macOS Accessibility APIs.
 
-Built with native Swift, AppKit, SwiftUI, and macOS Accessibility APIs.
+Requires **macOS 13 or later**.
 
----
+## Features
 
-## ✨ Features
+### Snap and tile windows
 
-- **Intuitive Window Snapping**:
-  - Snap active windows to **Halves** (Left, Right, Top, Bottom)
-  - **Full Screen / Maximize** and **Center Window**
-  - **Quarters** (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
-  - **Thirds** (Left 1/3, Center 1/3, Right 1/3, Left 2/3, Right 2/3)
-  - Multi-display awareness (automatically computes snap boundaries based on each monitor's usable area excluding the Dock and Menu Bar).
+- Snap the target window to halves, quarters, thirds, two-thirds, center, or the full usable display area.
+- Uses the selected window's display and respects the Dock, menu bar, and configured window gap.
+- Remembers each window's original frame. Selecting the same snap zone again toggles it back; use Restore to return to its original position and size.
+- Includes a Quick Snap Studio with a visual layout preview.
 
-- **Snap Memory & Undo**:
-  - Remembers the original pre-snap position and size of every window.
-  - Clicking the same snap action a second time toggles the window back to its original size.
-  - Dedicated **Restore Original Size & Position** button and `⌃⌥↓` shortcut.
+### Save and recall workspaces
 
-- **Workspace Layouts**:
-  - Save as many desktop arrangements as you need, with running apps and their window coordinates.
-  - Instantly recall and reposition all windows simultaneously with a single click or keyboard shortcut.
-  - If a saved app isn't currently running when recalled, Slotr automatically launches it and restores its frame.
-  - Rename and reorder saved layouts (e.g., *"Coding & Terminal"*, *"Trading Dashboard"*, *"Social & Music"*).
-  - Persisted automatically to `UserDefaults` and `~/Library/Application Support/Slotr/slots.json`.
+- Save as many desktop layouts as you need, including each window's app and position.
+- Search saved layouts by name or app, drag to reorder, and hover over a layout to see its saved windows, date, and display resolution.
+- Choose a target window from the dashboard's **Select Target Window** strip, then snap or restore that window.
+- Recall a layout with one click. If **Launch closed apps when recalling a layout** is enabled in Settings, Slotr opens saved apps that are not running.
+- Layouts are stored in UserDefaults and in `~/Library/Application Support/Slotr/slots.json`.
 
-- **Global Hotkeys**:
-  - `⌃ ⌥ 1` to `⌃ ⌥ 8`: Instant Recall Slot 1 through 8.
-  - `⌃ ⌥ ⇧ 1` to `⌃ ⌥ ⇧ 8`: Save Current Layout to Slot 1 through 8.
-  - Hotkeys cover the first eight slot IDs; any number of additional layouts can be saved and recalled from the dashboard or Menu Bar.
-  - `⌃ ⌥ ←`: Snap Left Half.
-  - `⌃ ⌥ →`: Snap Right Half.
-  - `⌃ ⌥ ↑` or `⌃ ⌥ ↩`: Maximize Window.
-  - `⌃ ⌥ ↓`: Restore Original Window Size & Position.
-  - `⌃ ⌥ C`: Center Window.
+### Menu bar and keyboard shortcuts
 
-- **Dual Mode UI**:
-  - Full Interactive Dashboard window with searchable, reorderable saved layouts and snap controls.
-  - Top Menu Bar extra with quick popover for rapid access.
-  - Translucent on-screen HUD overlay showing feedback when snapping or recalling slots.
+Slotr's menu bar popover provides quick access to saved workspaces and window snapping. Keyboard shortcuts are available for the first eight slot IDs; additional layouts can be saved and recalled from the dashboard or menu bar.
 
----
+| Shortcut | Action |
+| --- | --- |
+| `⌃⌥1` through `⌃⌥8` | Recall slot 1 through 8 |
+| `⌃⌥⇧1` through `⌃⌥⇧8` | Save the current layout to slot 1 through 8 |
+| `⌃⌥←` / `⌃⌥→` | Snap left / right half |
+| `⌃⌥↑` or `⌃⌥↩` | Maximize the target window |
+| `⌃⌥↓` | Restore the original window frame |
+| `⌃⌥C` | Center the target window |
 
-## 🚀 Quick Start & Installation
+## Installation and permissions
 
-### Option 1: Install from DMG
-1. Open `build/Slotr.dmg`.
-2. Drag `Slotr.app` into your **Applications** folder.
-3. Launch **Slotr**.
-4. On first launch, grant Accessibility permission when prompted in:
-   `System Settings > Privacy & Security > Accessibility`
-   Turn the toggle **ON** for Slotr.
-5. Slotr will automatically detect the permission and activate.
+To install a release DMG, open `build/Slotr.dmg` and drag `Slotr.app` into Applications. Then launch Slotr.
 
-### Option 2: Build from Source
+Slotr needs macOS Accessibility permission to read and move other apps' windows. If permission is missing, Slotr opens the relevant System Settings page. Enable Slotr under **Privacy & Security → Accessibility** (the permission may be grouped under **Device Control & Data Access** on some macOS versions). Slotr checks the existing permission and does not ask you to enable it again when macOS already trusts the app.
+
+Builds from this repository are ad-hoc signed. macOS may treat a new build as a different Accessibility identity and ask for permission again; a stable Developer ID signing identity is needed to avoid that behavior across builds.
+
+## Build from source
+
 ```bash
 # Build the native app bundle
 make build
 
-# Package into a release DMG
+# Create build/Slotr.dmg
 make dmg
 
-# Run the app directly
+# Build and launch the app
 make run
 ```
 
----
+## About
 
-## 🛠 Project Architecture
+Slotr is developed by **Suriya Prakhash Deenadayalan** and is distributed under the [MIT License](LICENSE). See [www.slotr.suriyaprakhash.com](https://www.slotr.suriyaprakhash.com) for more information and updates.
 
-```
-macsnap/
-├── Package.swift                     # Swift Package Manager manifest
-├── Sources/
-│   └── Slotr/
-│       ├── main.swift                # App entry point
-│       ├── AppDelegate.swift         # Window & status bar controller
-│       ├── Models/
-│       │   ├── SnapZone.swift        # Geometric snap target definitions
-│       │   ├── SavedLayout.swift     # Codable models for saved workspace layouts
-│       │   └── WindowHistory.swift   # Pre-snap frame cache & toggle logic
-│       ├── Managers/
-│       │   ├── AccessibilityManager.swift # Permission checking & live observer
-│       │   ├── WindowManager.swift   # AXUIElement window manipulation & screen math
-│       │   ├── SlotManager.swift     # Workspace persistence & instantaneous recall
-│       │   └── HotkeyManager.swift   # Carbon global hotkeys
-│       └── UI/
-│           ├── MainDashboardView.swift # Full interactive dashboard window
-│           ├── MenuBarView.swift     # Menu bar popover interface
-│           ├── SlotCardView.swift    # Interactive card for each slot
-│           ├── SnapGridButtons.swift # Grid of visual snap buttons
-│           └── HUDOverlay.swift      # Floating translucent notification bezel
-├── Scripts/
-│   ├── generate_icons.sh             # Generates AppIcon.icns
-│   ├── build_app.sh                  # Compiles native binary & creates .app bundle
-│   └── package_dmg.sh                # Packages .app into Slotr.dmg
-├── Resources/
-│   ├── Info.plist                    # Bundle metadata
-│   ├── Slotr.entitlements            # Security entitlements
-│   └── AppIcon.icns                  # macOS application icon
-├── Makefile                          # Build automation targets
-├── MAC_APP_STORE_GUIDE.md            # Complete guide for Mac App Store publication
-└── README.md
-```
+## Project layout
 
----
-
-## 📦 What It Takes to Put Slotr on the Mac App Store
-
-See the full guide in [MAC_APP_STORE_GUIDE.md](file:///Users/suriya/main/ws/github/macsnap/MAC_APP_STORE_GUIDE.md).
+- `Sources/Slotr/Managers/` — accessibility, desktop/Spaces discovery, window positioning, saved layouts, and shortcuts.
+- `Sources/Slotr/Models/` — snap zones, layout models, and window history.
+- `Sources/Slotr/UI/` — dashboard, menu bar, snap controls, and HUD.
+- `Resources/` — app metadata and entitlements.
+- `Scripts/` — icon generation, app bundling, and DMG packaging.

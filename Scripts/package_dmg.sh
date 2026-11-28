@@ -27,14 +27,14 @@ ln -s /Applications "${STAGING_DIR}/Applications"
 
 # Add Quick Start note
 cat << 'EOF' > "${STAGING_DIR}/INSTALLATION.txt"
-Slotr — Intelligent Window Snapping & 8 Layout Slots
+Slotr — Window Snapping & Unlimited Workspace Layouts
 
 To install:
 1. Drag Slotr into the Applications folder.
 2. Open Slotr from Applications (or Spotlight).
 3. On first launch, grant Accessibility permission when prompted in:
    System Settings > Privacy & Security > Accessibility.
-4. Enjoy snapping windows and recalling your 8 workspace layouts!
+4. Save and recall as many workspace layouts as you need. Keyboard shortcuts are available for the first eight slots.
 
 Global Hotkeys:
 - Recall Slots 1..8:  Control + Option + 1..8
