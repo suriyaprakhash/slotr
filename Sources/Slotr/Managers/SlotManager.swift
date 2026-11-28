@@ -199,8 +199,8 @@ public class SlotManager: ObservableObject {
                 ($0.localizedName != nil && $0.localizedName == savedWin.appName)
             }
             
-            // If app isn't running, attempt to launch it
-            if targetApp == nil, !savedWin.bundleId.isEmpty {
+            // If app isn't running, attempt to launch it if enabled in Settings
+            if targetApp == nil, !savedWin.bundleId.isEmpty, AppSettings.shared.autoLaunchClosedApps {
                 if let appUrl = NSWorkspace.shared.urlForApplication(withBundleIdentifier: savedWin.bundleId) {
                     let config = NSWorkspace.OpenConfiguration()
                     config.activates = false
@@ -226,6 +226,19 @@ public class SlotManager: ObservableObject {
             message: "⚡️ Slot \(slotId) Restored (\(slot.windows.count) Windows)",
             icon: "bolt.fill"
         )
+        
+        WindowManager.shared.refreshTargetWindow()
+        DesktopManager.shared.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            WindowManager.shared.refreshTargetWindow()
+            DesktopManager.shared.refresh()
+        }
+        
+        if AppSettings.shared.hideWindowAfterRecall {
+            DispatchQueue.main.async {
+                AppDelegate.shared?.mainWindow?.orderOut(nil)
+            }
+        }
         return true
     }
     

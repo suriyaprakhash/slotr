@@ -67,15 +67,17 @@ public struct DesktopInfo: Identifiable, Equatable {
     public let isCurrent: Bool
     public let isMultiDisplay: Bool
     public let orientation: ScreenOrientation
+    public let displayBounds: CGRect
     public let windows: [DesktopWindow]
     
-    public init(id: Int64, index: Int, displayIndex: Int, isCurrent: Bool, isMultiDisplay: Bool, orientation: ScreenOrientation, windows: [DesktopWindow]) {
+    public init(id: Int64, index: Int, displayIndex: Int, isCurrent: Bool, isMultiDisplay: Bool, orientation: ScreenOrientation, displayBounds: CGRect = .zero, windows: [DesktopWindow]) {
         self.id = id
         self.index = index
         self.displayIndex = displayIndex
         self.isCurrent = isCurrent
         self.isMultiDisplay = isMultiDisplay
         self.orientation = orientation
+        self.displayBounds = displayBounds
         self.windows = windows
     }
     
@@ -163,7 +165,7 @@ public class DesktopManager: ObservableObject {
     private func startPolling() {
         guard pollTimer == nil else { return }
         
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.refreshInternal()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -172,6 +174,23 @@ public class DesktopManager: ObservableObject {
         // Re-check promptly when a display is added, removed, or reconfigured.
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshInternal()
+        }
+        
+        // Re-check immediately on Space switches or app activation.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshInternal()
+        }
+        
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -222,8 +241,11 @@ public class DesktopManager: ObservableObject {
         }
         var entries: [SpaceEntry] = []
         for (displayIndex, display) in displays.enumerated() {
-            // macOS 15+: the display dict carries the current space id directly.
-            let currentSpaceID = (display["Current Space"] as? NSNumber)?.int64Value
+            // macOS returns "Current Space" as a dict containing id64 / ManagedSpaceID (older versions may use NSNumber).
+            let currentSpaceDict = display["Current Space"] as? [String: Any]
+            let currentSpaceID = (currentSpaceDict?["id64"] as? NSNumber)?.int64Value
+                ?? (currentSpaceDict?["ManagedSpaceID"] as? NSNumber)?.int64Value
+                ?? (display["Current Space"] as? NSNumber)?.int64Value
             let spaces = display["Spaces"] as? [[String: Any]] ?? []
             for space in spaces {
                 guard let spaceID = (space["id64"] as? NSNumber)?.int64Value
@@ -269,10 +291,13 @@ public class DesktopManager: ObservableObject {
         }
         refreshWindowDetails(for: allWindowIDs, alwaysRefresh: currentSpaceWindowIDs)
         
-        // 4. Orientation per display.
+        // 4. Orientation & Quartz bounds per display.
         var orientationByDisplay: [Int: ScreenOrientation] = [:]
+        var boundsByDisplay: [Int: CGRect] = [:]
         for (displayIndex, display) in displays.enumerated() {
-            orientationByDisplay[displayIndex] = orientation(forDisplay: display, displayIndex: displayIndex)
+            let bounds = quartzBounds(forDisplay: display, displayIndex: displayIndex)
+            boundsByDisplay[displayIndex] = bounds
+            orientationByDisplay[displayIndex] = .from(frame: bounds)
         }
         
         // 5. Build the desktop models.
@@ -314,6 +339,7 @@ public class DesktopManager: ObservableObject {
                 isCurrent: entry.isCurrent,
                 isMultiDisplay: isMultiDisplay,
                 orientation: orientationByDisplay[entry.displayIndex] ?? .landscape,
+                displayBounds: boundsByDisplay[entry.displayIndex] ?? .zero,
                 windows: windows
             )
         }
@@ -370,27 +396,39 @@ public class DesktopManager: ObservableObject {
         )
     }
     
-    // MARK: - Orientation
+    // MARK: - Display Geometry & Orientation
     
-    private func orientation(forDisplay display: [String: Any], displayIndex: Int) -> ScreenOrientation {
-        // Preferred: match the SLS display UUID against NSScreen device descriptions.
+    private func screen(forDisplay display: [String: Any], displayIndex: Int) -> NSScreen? {
         if let displayUUID = display["Display Identifier"] as? String ?? display["DisplayUUID"] as? String,
-           let screen = NSScreen.screens.first(where: { Self.screenUUIDString($0) == displayUUID }) {
-            return .from(frame: screen.frame)
+           let matched = NSScreen.screens.first(where: { Self.screenUUIDString($0) == displayUUID }) {
+            return matched
         }
-        // Fallback: SLS display order follows NSScreen order (main first).
-        let screen = displayIndex < NSScreen.screens.count
-            ? NSScreen.screens[displayIndex]
-            : NSScreen.main
-        return .from(frame: screen?.frame ?? .zero)
+        return displayIndex < NSScreen.screens.count ? NSScreen.screens[displayIndex] : NSScreen.main
+    }
+    
+    private func quartzBounds(forDisplay display: [String: Any], displayIndex: Int) -> CGRect {
+        guard let targetScreen = screen(forDisplay: display, displayIndex: displayIndex) else {
+            return .zero
+        }
+        guard let primary = NSScreen.screens.first else {
+            return targetScreen.frame
+        }
+        let primaryHeight = primary.frame.height
+        let qX = targetScreen.frame.origin.x
+        let qY = primaryHeight - (targetScreen.frame.origin.y + targetScreen.frame.height)
+        return CGRect(x: qX, y: qY, width: targetScreen.frame.width, height: targetScreen.frame.height)
     }
     
     private static func screenUUIDString(_ screen: NSScreen) -> String? {
+        if let screenNumber = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
+           let uuid = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeRetainedValue(),
+           let uuidString = CFUUIDCreateString(nil, uuid) as String? {
+            return uuidString
+        }
         let key = NSDeviceDescriptionKey("NSScreenDeviceUUIDKey")
         if let string = screen.deviceDescription[key] as? String {
             return string
         }
-        // Some macOS versions expose the UUID as a raw 16-byte Data value.
         guard let data = screen.deviceDescription[key] as? Data, data.count == 16 else {
             return nil
         }
@@ -430,6 +468,16 @@ public class DesktopManager: ObservableObject {
             return
         }
         
+        saveDesktop(desktop, toSlotId: slotId)
+    }
+    
+    /// Saves a desktop's window layout into a specific slot (1...8).
+    public func saveDesktop(_ desktop: DesktopInfo, toSlotId slotId: Int) {
+        guard !desktop.isEmpty else {
+            HUDOverlay.shared.show(message: "\(desktop.displayName) Has No Windows", icon: "macwindow")
+            return
+        }
+        
         let label = desktop.displayName
         if desktop.isCurrent {
             // Active desktop: use the standard Accessibility capture path
@@ -450,6 +498,78 @@ public class DesktopManager: ObservableObject {
             }
             SlotManager.shared.saveDesktopWindows(savedWindows, to: slotId, desktopLabel: label)
         }
+    }
+    
+    /// Targets an external application window for Quick Snap when clicked in the Film Roll.
+    public func selectTargetWindow(_ window: DesktopWindow) {
+        if let app = NSRunningApplication(processIdentifier: window.ownerPID),
+           app.bundleIdentifier != Bundle.main.bundleIdentifier {
+            WindowManager.shared.lastActiveApp = app
+            WindowManager.shared.refreshTargetWindow()
+        }
+    }
+    
+    // MARK: - Switch Desktop (Space)
+    
+    /// Switches to the given desktop (macOS Space) by simulating the
+    /// Mission Control keyboard shortcut Control+<number>.
+    /// Requires Accessibility permission (already granted) and that the
+    /// user has the "Switch to Desktop N" shortcuts enabled in
+    /// System Settings → Keyboard → Keyboard Shortcuts → Mission Control.
+    public func switchToDesktop(_ desktop: DesktopInfo) {
+        // Don't switch if it's already the current space.
+        guard !desktop.isCurrent else { return }
+        
+        // The ordinal is 1-based Mission Control order.
+        let ordinal = desktop.index + 1
+        guard ordinal >= 1, ordinal <= 10 else {
+            HUDOverlay.shared.show(message: "Cannot switch: Desktop \(ordinal) out of range", icon: "exclamationmark.triangle")
+            return
+        }
+        
+        // macOS virtual keycodes for number keys 1-9, 0
+        // 1→18, 2→19, 3→20, 4→21, 5→23, 6→22, 7→26, 8→28, 9→25, 0→29
+        let keycodes: [Int: UInt16] = [
+            1: 18, 2: 19, 3: 20, 4: 21, 5: 23,
+            6: 22, 7: 26, 8: 28, 9: 25, 10: 29
+        ]
+        
+        guard let keycode = keycodes[ordinal] else { return }
+        
+        let src = CGEventSource(stateID: .combinedSessionState)
+        
+        guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: false) else {
+            HUDOverlay.shared.show(message: "Cannot create keyboard event", icon: "exclamationmark.triangle")
+            return
+        }
+        
+        keyDown.flags = .maskControl
+        keyUp.flags = .maskControl
+        
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+        
+        // Refresh after a short delay to let the space switch complete.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.refreshInternal()
+        }
+    }
+    
+    /// Cached app icon for a bundle id / app name.
+    public func icon(bundleId: String, appName: String) -> NSImage {
+        let key = bundleId.isEmpty ? appName : bundleId
+        if let cached = iconCache[key] { return cached }
+        
+        let image: NSImage
+        if !bundleId.isEmpty,
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            image = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            image = NSWorkspace.shared.icon(for: UTType.application)
+        }
+        iconCache[key] = image
+        return image
     }
 }
 

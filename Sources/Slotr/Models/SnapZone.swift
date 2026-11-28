@@ -81,45 +81,80 @@ public enum SnapZone: String, CaseIterable, Identifiable, Codable {
     }
     
     /// Computes the target frame in Accessibility (Quartz) coordinates for a given screen's usable area
-    public func targetFrame(for usableRect: CGRect) -> CGRect {
+    public func targetFrame(for usableRect: CGRect, gap: CGFloat = 0) -> CGRect {
         let x = usableRect.origin.x
         let y = usableRect.origin.y
         let w = usableRect.size.width
         let h = usableRect.size.height
         
+        let raw: CGRect
         switch self {
         case .leftHalf:
-            return CGRect(x: x, y: y, width: w / 2.0, height: h)
+            raw = CGRect(x: x, y: y, width: w / 2.0, height: h)
         case .rightHalf:
-            return CGRect(x: x + w / 2.0, y: y, width: w / 2.0, height: h)
+            raw = CGRect(x: x + w / 2.0, y: y, width: w / 2.0, height: h)
         case .topHalf:
-            return CGRect(x: x, y: y, width: w, height: h / 2.0)
+            raw = CGRect(x: x, y: y, width: w, height: h / 2.0)
         case .bottomHalf:
-            return CGRect(x: x, y: y + h / 2.0, width: w, height: h / 2.0)
+            raw = CGRect(x: x, y: y + h / 2.0, width: w, height: h / 2.0)
         case .maximize:
-            return usableRect
+            raw = usableRect
         case .topLeftQuarter:
-            return CGRect(x: x, y: y, width: w / 2.0, height: h / 2.0)
+            raw = CGRect(x: x, y: y, width: w / 2.0, height: h / 2.0)
         case .topRightQuarter:
-            return CGRect(x: x + w / 2.0, y: y, width: w / 2.0, height: h / 2.0)
+            raw = CGRect(x: x + w / 2.0, y: y, width: w / 2.0, height: h / 2.0)
         case .bottomLeftQuarter:
-            return CGRect(x: x, y: y + h / 2.0, width: w / 2.0, height: h / 2.0)
+            raw = CGRect(x: x, y: y + h / 2.0, width: w / 2.0, height: h / 2.0)
         case .bottomRightQuarter:
-            return CGRect(x: x + w / 2.0, y: y + h / 2.0, width: w / 2.0, height: h / 2.0)
+            raw = CGRect(x: x + w / 2.0, y: y + h / 2.0, width: w / 2.0, height: h / 2.0)
         case .leftThird:
-            return CGRect(x: x, y: y, width: w / 3.0, height: h)
+            raw = CGRect(x: x, y: y, width: w / 3.0, height: h)
         case .centerThird:
-            return CGRect(x: x + w / 3.0, y: y, width: w / 3.0, height: h)
+            raw = CGRect(x: x + w / 3.0, y: y, width: w / 3.0, height: h)
         case .rightThird:
-            return CGRect(x: x + 2.0 * (w / 3.0), y: y, width: w / 3.0, height: h)
+            raw = CGRect(x: x + 2.0 * (w / 3.0), y: y, width: w / 3.0, height: h)
         case .leftTwoThirds:
-            return CGRect(x: x, y: y, width: 2.0 * (w / 3.0), height: h)
+            raw = CGRect(x: x, y: y, width: 2.0 * (w / 3.0), height: h)
         case .rightTwoThirds:
-            return CGRect(x: x + w / 3.0, y: y, width: 2.0 * (w / 3.0), height: h)
+            raw = CGRect(x: x + w / 3.0, y: y, width: 2.0 * (w / 3.0), height: h)
         case .center:
             let cw = w * 0.72
             let ch = h * 0.80
             return CGRect(x: x + (w - cw) / 2.0, y: y + (h - ch) / 2.0, width: cw, height: ch)
+        }
+        
+        guard gap > 0 else { return raw }
+        let halfGap = gap / 2.0
+        let leftInset = (raw.minX <= usableRect.minX + 1) ? gap : halfGap
+        let rightInset = (raw.maxX >= usableRect.maxX - 1) ? gap : halfGap
+        let topInset = (raw.minY <= usableRect.minY + 1) ? gap : halfGap
+        let bottomInset = (raw.maxY >= usableRect.maxY - 1) ? gap : halfGap
+        return CGRect(
+            x: raw.minX + leftInset,
+            y: raw.minY + topInset,
+            width: max(80, raw.width - leftInset - rightInset),
+            height: max(80, raw.height - topInset - bottomInset)
+        )
+    }
+    
+    /// Normalized 0..1 rectangle for miniature layout previews (top-left origin).
+    public var normalizedPreviewRect: CGRect {
+        switch self {
+        case .leftHalf: return CGRect(x: 0, y: 0, width: 0.5, height: 1)
+        case .rightHalf: return CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
+        case .topHalf: return CGRect(x: 0, y: 0, width: 1, height: 0.5)
+        case .bottomHalf: return CGRect(x: 0, y: 0.5, width: 1, height: 0.5)
+        case .maximize: return CGRect(x: 0, y: 0, width: 1, height: 1)
+        case .topLeftQuarter: return CGRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        case .topRightQuarter: return CGRect(x: 0.5, y: 0, width: 0.5, height: 0.5)
+        case .bottomLeftQuarter: return CGRect(x: 0, y: 0.5, width: 0.5, height: 0.5)
+        case .bottomRightQuarter: return CGRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5)
+        case .leftThird: return CGRect(x: 0, y: 0, width: 0.333, height: 1)
+        case .centerThird: return CGRect(x: 0.333, y: 0, width: 0.333, height: 1)
+        case .rightThird: return CGRect(x: 0.666, y: 0, width: 0.334, height: 1)
+        case .leftTwoThirds: return CGRect(x: 0, y: 0, width: 0.666, height: 1)
+        case .rightTwoThirds: return CGRect(x: 0.334, y: 0, width: 0.666, height: 1)
+        case .center: return CGRect(x: 0.14, y: 0.1, width: 0.72, height: 0.8)
         }
     }
 }

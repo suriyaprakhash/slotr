@@ -2,102 +2,178 @@ import SwiftUI
 
 public struct SnapGridButtons: View {
     @ObservedObject var windowManager = WindowManager.shared
+    @Environment(\.colorScheme) private var colorScheme
     
-    public init() {}
+    var activeZone: SnapZone? = nil
+    var onHoverZone: ((SnapZone?) -> Void)? = nil
+    var onSnapZone: ((SnapZone) -> Void)? = nil
+    
+    public init(
+        activeZone: SnapZone? = nil,
+        onHoverZone: ((SnapZone?) -> Void)? = nil,
+        onSnapZone: ((SnapZone) -> Void)? = nil
+    ) {
+        self.activeZone = activeZone
+        self.onHoverZone = onHoverZone
+        self.onSnapZone = onSnapZone
+    }
     
     public var body: some View {
-        VStack(spacing: 10) {
-            // Main Halves & Maximize
-            HStack(spacing: 8) {
-                SnapButton(zone: .leftHalf, shortcut: "⌃⌥←")
-                SnapButton(zone: .maximize, shortcut: "⌃⌥↑")
-                SnapButton(zone: .rightHalf, shortcut: "⌃⌥→")
+        VStack(alignment: .leading, spacing: 18) {
+            // Halves & Full
+            sectionBlock(title: "Halves & Full") {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                    spacing: 10
+                ) {
+                    snapCard(.leftHalf, shortcut: "⌃⌥←")
+                    snapCard(.maximize, shortcut: "⌃⌥↩")
+                    snapCard(.rightHalf, shortcut: "⌃⌥→")
+                    snapCard(.topHalf)
+                    snapCard(.center, shortcut: "⌃⌥C")
+                    snapCard(.bottomHalf)
+                }
             }
             
-            // Top/Bottom & Center
-            HStack(spacing: 8) {
-                SnapButton(zone: .topHalf)
-                SnapButton(zone: .center, shortcut: "⌃⌥C")
-                SnapButton(zone: .bottomHalf)
+            // Quarters (Corners)
+            sectionBlock(title: "Quarters (Corners)") {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2),
+                    spacing: 10
+                ) {
+                    snapCard(.topLeftQuarter)
+                    snapCard(.topRightQuarter)
+                    snapCard(.bottomLeftQuarter)
+                    snapCard(.bottomRightQuarter)
+                }
             }
             
-            // Four Quarters
-            HStack(spacing: 8) {
-                SnapButton(zone: .topLeftQuarter)
-                SnapButton(zone: .topRightQuarter)
-                SnapButton(zone: .bottomLeftQuarter)
-                SnapButton(zone: .bottomRightQuarter)
+            // Thirds & Two-Thirds
+            sectionBlock(title: "Thirds & Two-Thirds") {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                    spacing: 10
+                ) {
+                    snapCard(.leftThird)
+                    snapCard(.centerThird)
+                    snapCard(.rightThird)
+                    snapCard(.leftTwoThirds)
+                    snapCard(.rightTwoThirds)
+                }
             }
             
-            // Thirds
-            HStack(spacing: 8) {
-                SnapButton(zone: .leftThird)
-                SnapButton(zone: .centerThird)
-                SnapButton(zone: .rightThird)
-                SnapButton(zone: .leftTwoThirds)
-                SnapButton(zone: .rightTwoThirds)
-            }
-            
-            // Undo / Restore Original Size Button
+            // Restore Original Size & Position
             Button(action: {
                 windowManager.restoreOriginalWindowSize()
+                onHoverZone?(nil)
             }) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .semibold))
                     Text("Restore Original Size & Position")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12.5, weight: .semibold))
                     Spacer()
-                    Text("⌃⌥↓")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    MacKeycapBadge("⌃⌥↓", compact: true)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(7)
+                .foregroundColor(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.slotrCardBg(colorScheme))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+                )
             }
             .buttonStyle(.plain)
         }
     }
-}
-
-private struct SnapButton: View {
-    let zone: SnapZone
-    var shortcut: String? = nil
     
-    var body: some View {
-        Button(action: {
-            WindowManager.shared.snapActiveWindow(to: zone)
-        }) {
-            VStack(spacing: 3) {
-                Image(systemName: zone.iconName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-                
-                Text(zone.title)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+    private func sectionBlock<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundColor(.primary)
+            content()
         }
-        .buttonStyle(SnapGridButtonStyle())
-        .help(shortcut != nil ? "\(zone.title) (\(shortcut!))" : zone.title)
+    }
+    
+    private func snapCard(_ zone: SnapZone, shortcut: String? = nil) -> some View {
+        SnapZoneCardButton(
+            zone: zone,
+            shortcut: shortcut,
+            isActive: activeZone == zone,
+            onHover: { hovering in
+                onHoverZone?(hovering ? zone : nil)
+            },
+            onTap: {
+                windowManager.snapActiveWindow(to: zone)
+                onSnapZone?(zone)
+            }
+        )
     }
 }
 
-private struct SnapGridButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+private struct SnapZoneCardButton: View {
+    let zone: SnapZone
+    var shortcut: String? = nil
+    var isActive: Bool = false
+    var onHover: (Bool) -> Void
+    var onTap: () -> Void
+    
+    @ObservedObject private var dashboardVM = DashboardViewModel.shared
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var isHovered: Bool {
+        dashboardVM.hoveredCardZone == zone
+    }
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 5) {
+                SnapZoneDiagram(zone: zone, width: 26, height: 18, isActive: isActive || isHovered)
+                
+                Text(zone.title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(" ")
+                        .font(.system(size: 9.5))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(configuration.isPressed ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.05))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.slotrCardBg(colorScheme))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(configuration.isPressed ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(
+                        (isActive || isHovered) ? Color.slotrBlue.opacity(0.75) : Color.slotrBorder(colorScheme),
+                        lineWidth: (isActive || isHovered) ? 1.5 : 1
+                    )
             )
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.03), radius: 2, x: 0, y: 1)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                dashboardVM.hoveredCardZone = zone
+            } else if dashboardVM.hoveredCardZone == zone {
+                dashboardVM.hoveredCardZone = nil
+            }
+            onHover(hovering)
+        }
+        .help(shortcut != nil ? "\(zone.title) (\(shortcut!))" : zone.title)
     }
 }

@@ -1,7 +1,7 @@
 import Cocoa
 import ApplicationServices
 
-public struct TargetWindowDetails {
+public struct TargetWindowDetails: Equatable {
     public let appName: String
     public let bundleId: String
     public let title: String
@@ -19,8 +19,21 @@ public class WindowManager: ObservableObject {
     /// Tracks the application that was active right before Slotr took focus
     public var lastActiveApp: NSRunningApplication?
     
+    private var pollTimer: Timer?
+    private var axObserver: AXObserver?
+    private var observedPID: pid_t = 0
+    private var pendingAXRefresh: DispatchWorkItem?
+    private var pendingPostSnapRefresh: DispatchWorkItem?
+    
     private init() {
         setupObservers()
+        startPolling()
+    }
+    
+    deinit {
+        stopPolling()
+        teardownAXObserver()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
     
     private func setupObservers() {
@@ -30,6 +43,26 @@ public class WindowManager: ObservableObject {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceDidChange(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+    }
+    
+    private func startPolling() {
+        guard pollTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.refreshTargetWindow()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+    
+    private func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
     
     @objc private func didActivateApplication(_ notification: Notification) {
@@ -38,6 +71,66 @@ public class WindowManager: ObservableObject {
             self.lastActiveApp = app
             self.refreshTargetWindow()
         }
+    }
+    
+    @objc private func activeSpaceDidChange(_ notification: Notification) {
+        refreshTargetWindow()
+    }
+    
+    // MARK: - Live AX Resize / Move Observer
+    
+    private func ensureAXObserver(for pid: pid_t) {
+        guard AccessibilityManager.shared.isTrusted else {
+            teardownAXObserver()
+            return
+        }
+        guard pid > 0, pid != observedPID else { return }
+        teardownAXObserver()
+        
+        var observer: AXObserver?
+        let callback: AXObserverCallback = { _, _, _, refcon in
+            guard let refcon = refcon else { return }
+            let manager = Unmanaged<WindowManager>.fromOpaque(refcon).takeUnretainedValue()
+            manager.scheduleLiveRefreshFromAX()
+        }
+        
+        guard AXObserverCreate(pid, callback, &observer) == .success, let observer else {
+            return
+        }
+        
+        let appElement = AXUIElementCreateApplication(pid)
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        let notifications: [CFString] = [
+            kAXWindowResizedNotification as CFString,
+            kAXWindowMovedNotification as CFString,
+            kAXFocusedWindowChangedNotification as CFString,
+            kAXTitleChangedNotification as CFString
+        ]
+        for notif in notifications {
+            AXObserverAddNotification(observer, appElement, notif, refcon)
+        }
+        
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        self.axObserver = observer
+        self.observedPID = pid
+    }
+    
+    private func teardownAXObserver() {
+        if let observer = axObserver {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+        }
+        axObserver = nil
+        observedPID = 0
+    }
+    
+    private func scheduleLiveRefreshFromAX() {
+        pendingAXRefresh?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.refreshTargetWindow()
+            DesktopManager.shared.refresh()
+        }
+        pendingAXRefresh = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: work)
     }
     
     // MARK: - Target App & Window Resolution
@@ -84,10 +177,14 @@ public class WindowManager: ObservableObject {
     public func refreshTargetWindow() {
         guard let (app, win) = getTargetWindowElement() else {
             DispatchQueue.main.async {
-                self.targetWindowDetails = nil
+                if self.targetWindowDetails != nil {
+                    self.targetWindowDetails = nil
+                }
             }
             return
         }
+        
+        ensureAXObserver(for: app.processIdentifier)
         
         let appName = app.localizedName ?? "App"
         let bundleId = app.bundleIdentifier ?? ""
@@ -108,7 +205,9 @@ public class WindowManager: ObservableObject {
         )
         
         DispatchQueue.main.async {
-            self.targetWindowDetails = details
+            if self.targetWindowDetails != details {
+                self.targetWindowDetails = details
+            }
         }
     }
     
@@ -210,7 +309,8 @@ public class WindowManager: ObservableObject {
         
         let screen = getScreen(for: currentFrame)
         let usableRect = getQuartzUsableRect(for: screen)
-        let targetFrame = zone.targetFrame(for: usableRect)
+        let gap = CGFloat(AppSettings.shared.windowGapPadding.rawValue)
+        let targetFrame = zone.targetFrame(for: usableRect, gap: gap)
         
         let bundleId = app.bundleIdentifier ?? ""
         let title = getWindowTitle(window)
@@ -226,14 +326,14 @@ public class WindowManager: ObservableObject {
         if shouldToggle {
             // Restore back to original pre-snap frame
             setWindowFrame(window, frame: originalFrame)
-            refreshTargetWindow()
+            triggerImmediateAndSettledRefresh()
             HUDOverlay.shared.show(message: "Restored to Original Size", icon: "arrow.counterclockwise")
             return true
         } else {
             // Apply the snap frame
             setWindowFrame(window, frame: targetFrame)
             WindowHistoryTracker.shared.updateLastSnappedFrame(for: windowKey, frame: targetFrame)
-            refreshTargetWindow()
+            triggerImmediateAndSettledRefresh()
             HUDOverlay.shared.show(message: "Snapped to \(zone.title)", icon: zone.iconName)
             return true
         }
@@ -253,8 +353,22 @@ public class WindowManager: ObservableObject {
         
         setWindowFrame(window, frame: original)
         WindowHistoryTracker.shared.removeHistory(for: windowKey)
-        refreshTargetWindow()
+        triggerImmediateAndSettledRefresh()
         HUDOverlay.shared.show(message: "Restored Original Size & Position", icon: "arrow.counterclockwise")
         return true
+    }
+    
+    private func triggerImmediateAndSettledRefresh() {
+        refreshTargetWindow()
+        DesktopManager.shared.refresh()
+        
+        // Re-read after 150ms so apps that clamp or animate AX resize settle accurately.
+        pendingPostSnapRefresh?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.refreshTargetWindow()
+            DesktopManager.shared.refresh()
+        }
+        pendingPostSnapRefresh = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 }
