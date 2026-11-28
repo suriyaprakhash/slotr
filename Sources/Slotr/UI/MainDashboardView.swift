@@ -1,4 +1,5 @@
 import SwiftUI
+import ApplicationServices
 
 public struct MainDashboardView: View {
     @ObservedObject var accessibilityManager = AccessibilityManager.shared
@@ -163,22 +164,37 @@ public struct MainDashboardView: View {
                 .background(Color.green.opacity(0.12))
                 .cornerRadius(12)
             } else {
-                Button(action: {
-                    accessibilityManager.requestPermission()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.orange)
-                        Text("Grant Accessibility Permission")
-                            .font(.system(size: 11.5, weight: .bold))
+                VStack(alignment: .trailing, spacing: 3) {
+                    Button(action: {
+                        // Re-check first (synchronously): the user may have just
+                        // granted access in System Settings.
+                        if AXIsProcessTrusted() {
+                            accessibilityManager.checkPermission()
+                        } else {
+                            accessibilityManager.requestPermission()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.orange)
+                            Text("Grant Accessibility Permission")
+                                .font(.system(size: 11.5, weight: .bold))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.18))
+                        .cornerRadius(8)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.18))
-                    .cornerRadius(8)
+                    .buttonStyle(.plain)
+                    
+                    Text("Enable \"Slotr\" in Privacy & Security → Accessibility")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help("Turn on Slotr in System Settings → Privacy & Security → Accessibility.\n\nNote: multiple local builds can appear as separate \"Slotr\" entries — enable the one for this build:\n\(Bundle.main.bundlePath)")
                 }
-                .buttonStyle(.plain)
             }
         }
     }
