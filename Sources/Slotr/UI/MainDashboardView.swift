@@ -44,6 +44,7 @@ public class DashboardViewModel: ObservableObject {
     @Published public var selectedDesktopID: Int64? = nil
     @Published public var selectedFilmWindowID: CGWindowID? = nil
     @Published public var filmRollSelectedOnly: Bool = true
+    @Published public var hoveredSavedSlotID: Int? = nil
     @Published public var hoveredSnapZone: SnapZone? = nil
     @Published public var hoveredCardZone: SnapZone? = nil
     @Published public var stageSnapZone: SnapZone = .leftHalf
@@ -291,7 +292,9 @@ public struct MainDashboardView: View {
     }
 
     private func savedLayoutSidebarRow(_ slot: LayoutSlot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isHovered = dashboardVM.hoveredSavedSlotID == slot.id
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 10, weight: .medium))
@@ -381,6 +384,48 @@ public struct MainDashboardView: View {
                 .buttonStyle(.plain)
                 .help(slot.isEmpty ? "Save selected desktop to Slot \(slot.id)" : "Recall Slot \(slot.id)")
             }
+
+            if isHovered {
+                VStack(alignment: .leading, spacing: 5) {
+                    Divider()
+                    HStack(spacing: 6) {
+                        Label(slot.formattedDate, systemImage: "clock")
+                        Spacer(minLength: 4)
+                        if let width = slot.screenWidth, let height = slot.screenHeight {
+                            Text("\(Int(width)) × \(Int(height))")
+                        }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                    ForEach(Array(slot.windows.prefix(4).enumerated()), id: \.offset) { _, window in
+                        HStack(spacing: 5) {
+                            Image(systemName: "macwindow")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                            Text(window.appName)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.primary)
+                            if !window.windowTitle.isEmpty && window.windowTitle != window.appName {
+                                Text(window.windowTitle)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+
+                    if slot.windows.count > 4 {
+                        Text("+\(slot.windows.count - 4) more windows")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.leading, 48)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(8)
         .background(
@@ -411,6 +456,15 @@ public struct MainDashboardView: View {
         .dropDestination(for: String.self) { draggedIDs, _ in
             guard let draggedID = draggedIDs.first.flatMap(Int.init) else { return false }
             return slotManager.moveSlot(id: draggedID, before: slot.id)
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.18)) {
+                if hovering {
+                    dashboardVM.hoveredSavedSlotID = slot.id
+                } else if dashboardVM.hoveredSavedSlotID == slot.id {
+                    dashboardVM.hoveredSavedSlotID = nil
+                }
+            }
         }
     }
 
@@ -887,7 +941,7 @@ public struct MainDashboardView: View {
             ScrollViewReader { proxy in
                 HStack(alignment: .center) {
                     HStack(spacing: 8) {
-                        Text("Target Windows Film Roll")
+                        Text("Select Target Window")
                             .font(.system(size: 13.5, weight: .semibold))
                         
                         Text("\(filteredFilmWindows.count) Windows")
@@ -967,13 +1021,27 @@ public struct MainDashboardView: View {
     }
     
     private func isFilmWindowSelected(_ w: DesktopWindow) -> Bool {
-        if let selectedFilmWindowID = dashboardVM.selectedFilmWindowID {
-            return selectedFilmWindowID == w.id
+        guard let target = windowManager.targetWindowDetails else {
+            return dashboardVM.selectedFilmWindowID == w.id
         }
-        if let target = windowManager.targetWindowDetails {
-            return target.bundleId == w.bundleId && (target.title == w.windowName || target.title.isEmpty)
+        guard target.bundleId == w.bundleId,
+              target.title.isEmpty || w.windowName.isEmpty || target.title == w.windowName else {
+            return false
         }
-        return false
+
+        let matchingWindows = filteredFilmWindows.filter { item in
+            item.window.bundleId == target.bundleId
+                && (target.title.isEmpty || item.window.windowName.isEmpty || target.title == item.window.windowName)
+        }
+        if matchingWindows.count == 1 {
+            return matchingWindows[0].window.id == w.id
+        }
+
+        let tolerance: CGFloat = 8
+        return abs(target.frame.minX - w.frame.minX) <= tolerance
+            && abs(target.frame.minY - w.frame.minY) <= tolerance
+            && abs(target.frame.width - w.frame.width) <= tolerance
+            && abs(target.frame.height - w.frame.height) <= tolerance
     }
 
     private var workspaceSnapSection: some View {

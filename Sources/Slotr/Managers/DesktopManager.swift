@@ -515,11 +515,7 @@ public class DesktopManager: ObservableObject {
     
     /// Targets an external application window for Quick Snap when clicked in the Film Roll.
     public func selectTargetWindow(_ window: DesktopWindow) {
-        if let app = NSRunningApplication(processIdentifier: window.ownerPID),
-           app.bundleIdentifier != Bundle.main.bundleIdentifier {
-            WindowManager.shared.lastActiveApp = app
-            WindowManager.shared.refreshTargetWindow()
-        }
+        WindowManager.shared.selectTargetWindow(window)
     }
     
     // MARK: - Switch Desktop (Space)
