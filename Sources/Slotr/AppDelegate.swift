@@ -15,7 +15,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Run as regular GUI app so Dock icon appears and window is visible
         NSApp.setActivationPolicy(.regular)
         
-        setupStatusItem()
+        if AppSettings.shared.showMenuBarIcon {
+            setupStatusItem()
+        }
         setupPopover()
         setupMainWindow()
         
@@ -41,13 +43,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     public func setupMainWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 840, height: 680),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 1060, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.minSize = NSSize(width: 880, height: 620)
         window.center()
-        window.title = "Slotr — Window Manager, Desktops & 8 Layout Slots"
+        window.title = "Slotr"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.contentViewController = NSHostingController(rootView: MainDashboardView())
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -70,7 +76,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     // MARK: - Status Bar Item
     
+    public func setStatusItemVisible(_ visible: Bool) {
+        if visible {
+            if statusItem == nil {
+                setupStatusItem()
+            }
+        } else {
+            closePopover(nil)
+            if let item = statusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+            }
+        }
+    }
+    
     private func setupStatusItem() {
+        guard statusItem == nil else { return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem?.button {
@@ -96,7 +117,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     
     private func setupPopover() {
-        popover.contentSize = NSSize(width: 380, height: 580)
+        popover.contentSize = NSSize(width: 340, height: 420)
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: MenuBarView())
@@ -160,6 +181,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(recallItem)
         
         // Save Slots submenu
+        let saveMenu = NSMenu()
         for i in 1...8 {
             let slot = SlotManager.shared.slot(for: i)
             let name = slot?.name ?? "Slot \(i)"
@@ -181,8 +203,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem?.button?.performClick(nil)
         statusItem?.menu = nil
     }
-    
-    private let saveMenu = NSMenu()
     
     @objc private func contextRecallSlot(_ sender: NSMenuItem) {
         SlotManager.shared.restoreLayout(from: sender.tag)
