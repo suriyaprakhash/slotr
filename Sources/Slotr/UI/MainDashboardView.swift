@@ -1,9 +1,11 @@
 import SwiftUI
+import ApplicationServices
 
 public struct MainDashboardView: View {
     @ObservedObject var accessibilityManager = AccessibilityManager.shared
     @ObservedObject var windowManager = WindowManager.shared
     @ObservedObject var slotManager = SlotManager.shared
+    @ObservedObject var desktopManager = DesktopManager.shared
     @ObservedObject var viewModel = MenuBarViewModel.shared
     
     public init() {}
@@ -38,8 +40,46 @@ public struct MainDashboardView: View {
                 
                 Divider()
                 
-                // Right Column: 8 Layout Slots Grid
+                // Right Column: Current Desktops + 8 Layout Slots Grid
                 VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Current Desktops")
+                                .font(.system(size: 14, weight: .bold))
+                            Text("Apps running on each Space. Slot a desktop into a preset in one click.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    // Horizontally scrollable row of desktop cards
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            if desktopManager.desktops.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "square.on.square")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                    Text(desktopManager.isAvailable
+                                         ? "Detecting Desktops…"
+                                         : "Desktop Detection Unavailable")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.vertical, 26)
+                            } else {
+                                ForEach(desktopManager.desktops) { desktop in
+                                    DesktopCardView(desktop: desktop)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    
+                    Divider()
+                    
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("8 Workspace Layout Slots")
@@ -73,7 +113,7 @@ public struct MainDashboardView: View {
                 .padding(.vertical, 10)
                 .background(Color(NSColor.controlBackgroundColor))
         }
-        .frame(minWidth: 780, minHeight: 580)
+        .frame(minWidth: 780, minHeight: 660)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             windowManager.refreshTargetWindow()
@@ -124,22 +164,37 @@ public struct MainDashboardView: View {
                 .background(Color.green.opacity(0.12))
                 .cornerRadius(12)
             } else {
-                Button(action: {
-                    accessibilityManager.requestPermission()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.orange)
-                        Text("Grant Accessibility Permission")
-                            .font(.system(size: 11.5, weight: .bold))
+                VStack(alignment: .trailing, spacing: 3) {
+                    Button(action: {
+                        // Re-check first (synchronously): the user may have just
+                        // granted access in System Settings.
+                        if AXIsProcessTrusted() {
+                            accessibilityManager.checkPermission()
+                        } else {
+                            accessibilityManager.requestPermission()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.orange)
+                            Text("Grant Accessibility Permission")
+                                .font(.system(size: 11.5, weight: .bold))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.18))
+                        .cornerRadius(8)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.18))
-                    .cornerRadius(8)
+                    .buttonStyle(.plain)
+                    
+                    Text("Enable \"Slotr\" in Privacy & Security → Accessibility")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help("Turn on Slotr in System Settings → Privacy & Security → Accessibility.\n\nNote: multiple local builds can appear as separate \"Slotr\" entries — enable the one for this build:\n\(Bundle.main.bundlePath)")
                 }
-                .buttonStyle(.plain)
             }
         }
     }

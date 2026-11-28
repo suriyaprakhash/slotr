@@ -11,6 +11,15 @@ public class AccessibilityManager: ObservableObject {
     private init() {
         checkPermission()
         startPolling()
+        // Users typically grant access in System Settings, then switch back to
+        // the app — re-check immediately on activation as well as on the poll.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.checkPermission()
+        }
     }
     
     deinit {
@@ -20,6 +29,7 @@ public class AccessibilityManager: ObservableObject {
     public func checkPermission() {
         let trusted = AXIsProcessTrusted()
         if self.isTrusted != trusted {
+            print("Slotr: accessibility trust state changed to \(trusted)")
             DispatchQueue.main.async {
                 self.isTrusted = trusted
             }

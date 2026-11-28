@@ -80,8 +80,48 @@ public class SlotManager: ObservableObject {
             return false
         }
         
+        let capturedWindows = captureOnScreenWindows()
+        return storeWindows(capturedWindows, to: slotId, hudMessage: "Slot \(slotId) Saved (\(capturedWindows.count) Windows)")
+    }
+    
+    /// Stores an already-captured window list into a slot.
+    /// Shared by the on-screen capture path and the desktop "Slot It" path.
+    @discardableResult
+    public func storeWindows(_ windows: [SavedWindow], to slotId: Int, hudMessage: String) -> Bool {
         guard let index = slots.firstIndex(where: { $0.id == slotId }) else { return false }
         
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let sWidth = screen?.frame.width ?? 0
+        let sHeight = screen?.frame.height ?? 0
+        
+        slots[index].windows = windows
+        slots[index].updatedAt = Date()
+        slots[index].screenWidth = Double(sWidth)
+        slots[index].screenHeight = Double(sHeight)
+        
+        saveSlots()
+        
+        HUDOverlay.shared.show(message: hudMessage, icon: "tray.and.arrow.down.fill")
+        return true
+    }
+    
+    /// Saves a desktop's window list (captured by DesktopManager) into a slot.
+    @discardableResult
+    public func saveDesktopWindows(_ windows: [SavedWindow], to slotId: Int, desktopLabel: String) -> Bool {
+        storeWindows(
+            windows,
+            to: slotId,
+            hudMessage: "\(desktopLabel) → Slot \(slotId) (\(windows.count) Windows)"
+        )
+    }
+    
+    /// ID of the first empty slot, or nil when all 8 are in use.
+    public func firstEmptySlotID() -> Int? {
+        slots.first(where: { $0.isEmpty })?.id
+    }
+    
+    /// Captures the frames of all on-screen app windows via Accessibility.
+    private func captureOnScreenWindows() -> [SavedWindow] {
         var capturedWindows: [SavedWindow] = []
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular &&
@@ -133,23 +173,7 @@ public class SlotManager: ObservableObject {
             }
         }
         
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        let sWidth = screen?.frame.width ?? 0
-        let sHeight = screen?.frame.height ?? 0
-        
-        slots[index].windows = capturedWindows
-        slots[index].updatedAt = Date()
-        slots[index].screenWidth = Double(sWidth)
-        slots[index].screenHeight = Double(sHeight)
-        
-        saveSlots()
-        
-        let windowCount = capturedWindows.count
-        HUDOverlay.shared.show(
-            message: "Slot \(slotId) Saved (\(windowCount) Windows)",
-            icon: "tray.and.arrow.down.fill"
-        )
-        return true
+        return capturedWindows
     }
     
     @discardableResult
