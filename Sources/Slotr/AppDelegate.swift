@@ -42,14 +42,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Main Dashboard Window
     
     public func setupMainWindow() {
+        let visibleFrame = NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let availableFrame = visibleFrame.insetBy(dx: 24, dy: 24)
+        let initialSize = NSSize(
+            width: min(1600, max(880, availableFrame.width)),
+            height: min(1400, max(620, availableFrame.height))
+        )
+        let initialFrame = NSRect(
+            x: visibleFrame.midX - initialSize.width / 2,
+            y: visibleFrame.midY - initialSize.height / 2,
+            width: initialSize.width,
+            height: initialSize.height
+        )
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1060, height: 720),
+            contentRect: initialFrame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 880, height: 620)
-        window.center()
+        window.minSize = NSSize(width: min(880, initialSize.width), height: min(620, initialSize.height))
         window.title = "Slotr"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true

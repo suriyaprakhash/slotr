@@ -102,7 +102,9 @@ public struct SlotCardView: View {
                         .font(.system(size: 10.5))
                         .foregroundColor(.secondary)
                     
-                    MacKeycapBadge("⌃⌥\(slot.id)", compact: true)
+                    if slot.id <= 8 {
+                        MacKeycapBadge("⌃⌥\(slot.id)", compact: true)
+                    }
                 }
             }
             
@@ -128,7 +130,7 @@ public struct SlotCardView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("Restore Slot \(slot.id) (⌃⌥\(slot.id))")
+                .help(slot.id <= 8 ? "Restore Slot \(slot.id) (⌃⌥\(slot.id))" : "Restore Slot \(slot.id)")
                 
                 Button(action: {
                     slotManager.clearSlot(slotId: slot.id)
@@ -187,7 +189,7 @@ public struct SlotCardView: View {
                         }
                 }
                 
-                Text("Empty preset • ⌃⌥\(slot.id)")
+                Text(slot.id <= 8 ? "Empty preset • ⌃⌥\(slot.id)" : "Empty preset")
                     .font(.system(size: 10.5))
                     .foregroundColor(.secondary)
             }
@@ -210,7 +212,9 @@ public struct SlotCardView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Capture windows into Slot \(slot.id) (⌃⌥⇧\(slot.id))")
+            .help(slot.id <= 8
+                  ? "Capture windows into Slot \(slot.id) (⌃⌥⇧\(slot.id))"
+                  : "Capture windows into Slot \(slot.id)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)

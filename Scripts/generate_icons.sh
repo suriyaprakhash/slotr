@@ -29,20 +29,20 @@ func renderMaster(pixels: Int) -> CGImage? {
         bitmapInfo: bitmapInfo
     ) else { return nil }
     
-    // Draw rounded background squircle
     let rect = CGRect(x: 0, y: 0, width: size, height: size)
-    let cornerRadius = size * 0.2237 // Apple continuous corner ratio
-    let clipPath = CGPath(roundedRect: rect.insetBy(dx: size * 0.04, dy: size * 0.04),
+    let backgroundRect = rect.insetBy(dx: size * 0.04, dy: size * 0.04)
+    let cornerRadius = size * 0.25
+    let clipPath = CGPath(roundedRect: backgroundRect,
                           cornerWidth: cornerRadius,
                           cornerHeight: cornerRadius,
                           transform: nil)
     ctx.addPath(clipPath)
     ctx.clip()
     
-    // Background Gradient: Deep midnight slate to rich indigo
+    // Keep the bundle icon aligned with SlotrLogoMark in the app.
     let colors = [
-        NSColor(red: 0.08, green: 0.12, blue: 0.24, alpha: 1.0).cgColor,
-        NSColor(red: 0.03, green: 0.05, blue: 0.12, alpha: 1.0).cgColor
+        NSColor(red: 0.118, green: 0.161, blue: 0.231, alpha: 1.0).cgColor,
+        NSColor(red: 0.059, green: 0.090, blue: 0.165, alpha: 1.0).cgColor
     ] as CFArray
     if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0.0, 1.0]) {
         ctx.drawLinearGradient(gradient,
@@ -51,84 +51,31 @@ func renderMaster(pixels: Int) -> CGImage? {
                                options: [])
     }
     
-    // Outer border glow
     ctx.addPath(clipPath)
-    ctx.setStrokeColor(NSColor(red: 0.35, green: 0.55, blue: 0.95, alpha: 0.45).cgColor)
-    ctx.setLineWidth(size * 0.02)
+    ctx.setStrokeColor(NSColor(white: 1.0, alpha: 0.15).cgColor)
+    ctx.setLineWidth(size * 0.028)
     ctx.strokePath()
     
-    // Window Frame illustration
-    let winRect = CGRect(x: size * 0.17, y: size * 0.26, width: size * 0.66, height: size * 0.53)
-    let winCorner = size * 0.045
-    let winPath = CGPath(roundedRect: winRect, cornerWidth: winCorner, cornerHeight: winCorner, transform: nil)
-    
-    // Window fill
-    ctx.addPath(winPath)
-    ctx.setFillColor(NSColor(red: 0.11, green: 0.16, blue: 0.30, alpha: 0.90).cgColor)
-    ctx.fillPath()
-    
-    ctx.addPath(winPath)
-    ctx.setStrokeColor(NSColor(red: 0.38, green: 0.62, blue: 0.95, alpha: 0.7).cgColor)
-    ctx.setLineWidth(size * 0.016)
-    ctx.strokePath()
-    
-    // Title bar traffic lights
-    let dotRadius = size * 0.015
-    let dotY = winRect.maxY - size * 0.046
-    let dotColors = [
-        NSColor(red: 0.98, green: 0.36, blue: 0.35, alpha: 1.0),
-        NSColor(red: 0.99, green: 0.73, blue: 0.22, alpha: 1.0),
-        NSColor(red: 0.24, green: 0.78, blue: 0.35, alpha: 1.0)
+    let padding = size * 0.19
+    let spacing = size * 0.07
+    let corner = size * 0.06
+    let contentSize = size - padding * 2
+    let columnSize = (contentSize - spacing) / 2
+    let leftRect = CGRect(x: padding, y: padding, width: columnSize, height: contentSize)
+    let rightX = leftRect.maxX + spacing
+    let upperRect = CGRect(x: rightX, y: padding + columnSize + spacing, width: columnSize, height: columnSize)
+    let lowerRect = CGRect(x: rightX, y: padding, width: columnSize, height: columnSize)
+
+    let shapes: [(CGRect, NSColor)] = [
+        (leftRect, NSColor(red: 0.220, green: 0.741, blue: 0.973, alpha: 1.0)),
+        (upperRect, NSColor(red: 0.008, green: 0.518, blue: 0.780, alpha: 0.9)),
+        (lowerRect, NSColor(red: 0.490, green: 0.827, blue: 0.988, alpha: 0.75))
     ]
-    for (i, col) in dotColors.enumerated() {
-        let dotX = winRect.minX + size * 0.045 + CGFloat(i) * size * 0.038
-        ctx.setFillColor(col.cgColor)
-        ctx.fillEllipse(in: CGRect(x: dotX - dotRadius, y: dotY - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
-    }
-    
-    // Snap Split: Left half snapped in electric cyan
-    let contentY = winRect.minY + size * 0.022
-    let contentH = winRect.height - size * 0.082
-    let halfW = (winRect.width - size * 0.03) / 2
-    
-    let leftHalf = CGRect(x: winRect.minX + size * 0.012, y: contentY, width: halfW, height: contentH)
-    let leftPath = CGPath(roundedRect: leftHalf, cornerWidth: size * 0.025, cornerHeight: size * 0.025, transform: nil)
-    ctx.addPath(leftPath)
-    ctx.setFillColor(NSColor(red: 0.12, green: 0.58, blue: 0.95, alpha: 0.82).cgColor)
-    ctx.fillPath()
-    ctx.addPath(leftPath)
-    ctx.setStrokeColor(NSColor(red: 0.40, green: 0.85, blue: 1.0, alpha: 0.95).cgColor)
-    ctx.setLineWidth(size * 0.012)
-    ctx.strokePath()
-    
-    // Right half (dashed window placeholder)
-    let rightHalf = CGRect(x: winRect.minX + halfW + size * 0.018, y: contentY, width: halfW, height: contentH)
-    let rightPath = CGPath(roundedRect: rightHalf, cornerWidth: size * 0.025, cornerHeight: size * 0.025, transform: nil)
-    ctx.addPath(rightPath)
-    ctx.setFillColor(NSColor(red: 0.07, green: 0.10, blue: 0.20, alpha: 0.45).cgColor)
-    ctx.fillPath()
-    ctx.addPath(rightPath)
-    ctx.setStrokeColor(NSColor(red: 0.3, green: 0.45, blue: 0.7, alpha: 0.6).cgColor)
-    let dashes: [CGFloat] = [size * 0.02, size * 0.015]
-    ctx.setLineDash(phase: 0, lengths: dashes)
-    ctx.setLineWidth(size * 0.01)
-    ctx.strokePath()
-    ctx.setLineDash(phase: 0, lengths: [])
-    
-    // 8 Layout Slots indicator dots at the bottom
-    let slotDotRadius = size * 0.019
-    let slotY = size * 0.14
-    let spacing = size * 0.075
-    let startX = (size - (7.0 * spacing)) / 2.0
-    for i in 0..<8 {
-        let x = startX + CGFloat(i) * spacing
-        let dotRect = CGRect(x: x - slotDotRadius, y: slotY - slotDotRadius, width: slotDotRadius * 2, height: slotDotRadius * 2)
-        if i == 0 || i == 1 || i == 3 {
-            ctx.setFillColor(NSColor(red: 0.18, green: 0.82, blue: 1.0, alpha: 0.95).cgColor)
-        } else {
-            ctx.setFillColor(NSColor(red: 0.22, green: 0.30, blue: 0.45, alpha: 0.55).cgColor)
-        }
-        ctx.fillEllipse(in: dotRect)
+    for (shapeRect, color) in shapes {
+        let path = CGPath(roundedRect: shapeRect, cornerWidth: corner, cornerHeight: corner, transform: nil)
+        ctx.addPath(path)
+        ctx.setFillColor(color.cgColor)
+        ctx.fillPath()
     }
     
     return ctx.makeImage()

@@ -1,6 +1,6 @@
 # Slotr ◧
 
-**Slotr** is a high-performance native macOS app that brings intelligent window snapping and **8 instant-recall workspace layout slots** to your Mac.
+**Slotr** is a high-performance native macOS app that brings intelligent window snapping and unlimited instant-recall workspace layouts to your Mac.
 
 Built with native Swift, AppKit, SwiftUI, and macOS Accessibility APIs.
 
@@ -20,16 +20,17 @@ Built with native Swift, AppKit, SwiftUI, and macOS Accessibility APIs.
   - Clicking the same snap action a second time toggles the window back to its original size.
   - Dedicated **Restore Original Size & Position** button and `⌃⌥↓` shortcut.
 
-- **8 Workspace Layout Slots**:
-  - Save full desktop arrangements of all running apps and their window coordinates into 8 independent slots.
+- **Workspace Layouts**:
+  - Save as many desktop arrangements as you need, with running apps and their window coordinates.
   - Instantly recall and reposition all windows simultaneously with a single click or keyboard shortcut.
   - If a saved app isn't currently running when recalled, Slotr automatically launches it and restores its frame.
-  - Rename slots (e.g., *"Coding & Terminal"*, *"Trading Dashboard"*, *"Social & Music"*).
+  - Rename and reorder saved layouts (e.g., *"Coding & Terminal"*, *"Trading Dashboard"*, *"Social & Music"*).
   - Persisted automatically to `UserDefaults` and `~/Library/Application Support/Slotr/slots.json`.
 
 - **Global Hotkeys**:
   - `⌃ ⌥ 1` to `⌃ ⌥ 8`: Instant Recall Slot 1 through 8.
   - `⌃ ⌥ ⇧ 1` to `⌃ ⌥ ⇧ 8`: Save Current Layout to Slot 1 through 8.
+  - Hotkeys cover the first eight slot IDs; any number of additional layouts can be saved and recalled from the dashboard or Menu Bar.
   - `⌃ ⌥ ←`: Snap Left Half.
   - `⌃ ⌥ →`: Snap Right Half.
   - `⌃ ⌥ ↑` or `⌃ ⌥ ↩`: Maximize Window.
@@ -37,7 +38,7 @@ Built with native Swift, AppKit, SwiftUI, and macOS Accessibility APIs.
   - `⌃ ⌥ C`: Center Window.
 
 - **Dual Mode UI**:
-  - Full Interactive Dashboard window displaying all 8 slots side-by-side with snap controls.
+  - Full Interactive Dashboard window with searchable, reorderable saved layouts and snap controls.
   - Top Menu Bar extra with quick popover for rapid access.
   - Translucent on-screen HUD overlay showing feedback when snapping or recalling slots.
 
@@ -79,12 +80,12 @@ macsnap/
 │       ├── AppDelegate.swift         # Window & status bar controller
 │       ├── Models/
 │       │   ├── SnapZone.swift        # Geometric snap target definitions
-│       │   ├── SavedLayout.swift     # Codable models for the 8 slots
+│       │   ├── SavedLayout.swift     # Codable models for saved workspace layouts
 │       │   └── WindowHistory.swift   # Pre-snap frame cache & toggle logic
 │       ├── Managers/
 │       │   ├── AccessibilityManager.swift # Permission checking & live observer
 │       │   ├── WindowManager.swift   # AXUIElement window manipulation & screen math
-│       │   ├── SlotManager.swift     # 8-slot persistence & instantaneous recall
+│       │   ├── SlotManager.swift     # Workspace persistence & instantaneous recall
 │       │   └── HotkeyManager.swift   # Carbon global hotkeys
 │       └── UI/
 │           ├── MainDashboardView.swift # Full interactive dashboard window
