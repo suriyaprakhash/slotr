@@ -88,7 +88,7 @@ public struct DesktopCardView: View {
                     Spacer()
                     
                     Menu {
-                        Button("First Empty Slot") {
+                        Button("Save as New Workspace") {
                             desktopManager.slotIt(desktop)
                         }
                         Divider()

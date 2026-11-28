@@ -2,7 +2,7 @@ import SwiftUI
 import ServiceManagement
 
 public enum MenuBarTab: String, CaseIterable, Identifiable {
-    case slots = "Slots (8)"
+    case slots = "Workspaces"
     case snap = "Snap Grid"
     case shortcuts = "Shortcuts"
     
@@ -107,8 +107,8 @@ public struct MenuBarView: View {
                             .font(.system(size: 11.5))
                             .foregroundColor(.secondary)
                         Spacer()
-                        Button("Save Slot 1") {
-                            slotManager.saveCurrentLayout(to: 1)
+                        Button("Save Current Layout") {
+                            captureCurrentSpaceAction()
                         }
                         .font(.system(size: 11, weight: .semibold))
                         .buttonStyle(.plain)
@@ -252,15 +252,15 @@ public struct MenuBarView: View {
     }
     
     private func captureCurrentSpaceAction() {
-        if let emptyId = slotManager.firstEmptySlotID() {
-            slotManager.saveCurrentLayout(to: emptyId)
-        } else {
+        guard let newSlotID = slotManager.nextSlotID() else {
             if !isPreview {
                 AppDelegate.shared?.closePopover(nil)
             }
             AppDelegate.shared?.showMainWindow()
-            HUDOverlay.shared.show(message: "All 8 Slots Are In Use", icon: "exclamationmark.triangle")
+            HUDOverlay.shared.show(message: "Unable to create another workspace", icon: "exclamationmark.triangle")
+            return
         }
+        slotManager.saveCurrentLayout(to: newSlotID)
     }
 }
 
@@ -294,9 +294,11 @@ private struct MenuBarSlotRow: View {
                 
                 Spacer()
                 
-                Text("⌃⌥\(slot.id)")
-                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
+                if slot.id <= 8 {
+                    Text("⌃⌥\(slot.id)")
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)

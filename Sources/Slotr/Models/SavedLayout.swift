@@ -24,7 +24,7 @@ public struct SavedWindow: Codable, Identifiable, Hashable {
 }
 
 public struct LayoutSlot: Codable, Identifiable {
-    public var id: Int // 1 to 8
+    public var id: Int
     public var name: String
     public var updatedAt: Date?
     public var windows: [SavedWindow]

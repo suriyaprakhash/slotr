@@ -116,12 +116,17 @@ public class DesktopManager: ObservableObject {
     @Published public private(set) var isAvailable: Bool = false
     
     private var pollTimer: Timer?
+    private var desktopSwitchQueue: [UInt16] = []
+    private var desktopSwitchInProgress = false
+    private var pendingDesktopSwitchID: Int64?
+    private var desktopSwitchGeneration = 0
     private var windowDetailCache: [CGWindowID: WindowDetail] = [:]
     private var iconCache: [String: NSImage] = [:]
     
     private let skyLightHandle: UnsafeMutableRawPointer?
     private let slsMainConnectionID: SLSMainConnectionIDFn?
     private let slsCopyManagedDisplaySpaces: SLSCopyManagedDisplaySpacesFn?
+    private let slsManagedDisplayGetCurrentSpace: SLSManagedDisplayGetCurrentSpaceFn?
     private let slsCopyWindowsWithOptionsAndTags: SLSCopyWindowsWithOptionsAndTagsFn?
     
     /// Window server-side details, cached per CGWindowID. Window numbers are
@@ -146,6 +151,7 @@ public class DesktopManager: ObservableObject {
         skyLightHandle = handle
         slsMainConnectionID = Self.resolve(handle, "SLSMainConnectionID")
         slsCopyManagedDisplaySpaces = Self.resolve(handle, "SLSCopyManagedDisplaySpaces")
+        slsManagedDisplayGetCurrentSpace = Self.resolve(handle, "SLSManagedDisplayGetCurrentSpace")
         slsCopyWindowsWithOptionsAndTags = Self.resolve(handle, "SLSCopyWindowsWithOptionsAndTags")
         
         startPolling()
@@ -243,9 +249,16 @@ public class DesktopManager: ObservableObject {
         for (displayIndex, display) in displays.enumerated() {
             // macOS returns "Current Space" as a dict containing id64 / ManagedSpaceID (older versions may use NSNumber).
             let currentSpaceDict = display["Current Space"] as? [String: Any]
-            let currentSpaceID = (currentSpaceDict?["id64"] as? NSNumber)?.int64Value
+            let currentSpaceIDFromDictionary = (currentSpaceDict?["id64"] as? NSNumber)?.int64Value
                 ?? (currentSpaceDict?["ManagedSpaceID"] as? NSNumber)?.int64Value
                 ?? (display["Current Space"] as? NSNumber)?.int64Value
+            let currentSpaceIDFromSkyLight: Int64? = {
+                guard let displayUUID = display["Display Identifier"] as? String,
+                      let getCurrentSpace = slsManagedDisplayGetCurrentSpace else { return nil }
+                let spaceID = getCurrentSpace(connectionID, displayUUID as CFString)
+                return spaceID == 0 ? nil : Int64(bitPattern: spaceID)
+            }()
+            let currentSpaceID = currentSpaceIDFromSkyLight ?? currentSpaceIDFromDictionary
             let spaces = display["Spaces"] as? [[String: Any]] ?? []
             for space in spaces {
                 guard let spaceID = (space["id64"] as? NSNumber)?.int64Value
@@ -459,19 +472,19 @@ public class DesktopManager: ObservableObject {
     
     // MARK: - Slot It
     
-    /// Saves this desktop's window layout into the first empty slot.
+    /// Saves this desktop's window layout as a new workspace.
     public func slotIt(_ desktop: DesktopInfo) {
         guard !desktop.isEmpty else { return }
         
-        guard let slotId = SlotManager.shared.firstEmptySlotID() else {
-            HUDOverlay.shared.show(message: "All 8 Slots Are In Use", icon: "exclamationmark.triangle")
+        guard let slotId = SlotManager.shared.nextSlotID() else {
+            HUDOverlay.shared.show(message: "Unable to create another workspace", icon: "exclamationmark.triangle")
             return
         }
         
         saveDesktop(desktop, toSlotId: slotId)
     }
     
-    /// Saves a desktop's window layout into a specific slot (1...8).
+    /// Saves a desktop's window layout into a specific workspace.
     public func saveDesktop(_ desktop: DesktopInfo, toSlotId slotId: Int) {
         guard !desktop.isEmpty else {
             HUDOverlay.shared.show(message: "\(desktop.displayName) Has No Windows", icon: "macwindow")
@@ -502,58 +515,177 @@ public class DesktopManager: ObservableObject {
     
     /// Targets an external application window for Quick Snap when clicked in the Film Roll.
     public func selectTargetWindow(_ window: DesktopWindow) {
-        if let app = NSRunningApplication(processIdentifier: window.ownerPID),
-           app.bundleIdentifier != Bundle.main.bundleIdentifier {
-            WindowManager.shared.lastActiveApp = app
-            WindowManager.shared.refreshTargetWindow()
-        }
+        WindowManager.shared.selectTargetWindow(window)
     }
     
     // MARK: - Switch Desktop (Space)
     
-    /// Switches to the given desktop (macOS Space) by simulating the
-    /// Mission Control keyboard shortcut Control+<number>.
-    /// Requires Accessibility permission (already granted) and that the
-    /// user has the "Switch to Desktop N" shortcuts enabled in
-    /// System Settings → Keyboard → Keyboard Shortcuts → Mission Control.
+    /// Switches to the given desktop by simulating Control+Left/Right.
     public func switchToDesktop(_ desktop: DesktopInfo) {
-        // Don't switch if it's already the current space.
-        guard !desktop.isCurrent else { return }
-        
-        // The ordinal is 1-based Mission Control order.
-        let ordinal = desktop.index + 1
-        guard ordinal >= 1, ordinal <= 10 else {
-            HUDOverlay.shared.show(message: "Cannot switch: Desktop \(ordinal) out of range", icon: "exclamationmark.triangle")
+        guard AccessibilityManager.shared.isTrusted else {
+            AccessibilityManager.shared.requestPermission()
+            HUDOverlay.shared.show(message: "Allow Accessibility access to switch desktops", icon: "exclamationmark.triangle")
             return
         }
-        
-        // macOS virtual keycodes for number keys 1-9, 0
-        // 1→18, 2→19, 3→20, 4→21, 5→23, 6→22, 7→26, 8→28, 9→25, 0→29
-        let keycodes: [Int: UInt16] = [
-            1: 18, 2: 19, 3: 20, 4: 21, 5: 23,
-            6: 22, 7: 26, 8: 28, 9: 25, 10: 29
-        ]
-        
-        guard let keycode = keycodes[ordinal] else { return }
-        
-        let src = CGEventSource(stateID: .combinedSessionState)
-        
-        guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: false) else {
+
+        let displaySpaces = desktops.filter { $0.displayIndex == desktop.displayIndex }
+        guard let targetPosition = displaySpaces.firstIndex(where: { $0.id == desktop.id }),
+              let currentDesktop = displaySpaces.first(where: { $0.isCurrent }) else {
+            HUDOverlay.shared.show(message: "Cannot determine the current desktop", icon: "exclamationmark.triangle")
+            return
+        }
+
+        let originDesktop = pendingDesktopSwitchID.flatMap { id in
+            displaySpaces.first(where: { $0.id == id })
+        } ?? currentDesktop
+        guard let originPosition = displaySpaces.firstIndex(where: { $0.id == originDesktop.id }) else { return }
+        let distance = targetPosition - originPosition
+        guard distance != 0 else { return }
+
+        let keyCode: UInt16 = distance < 0 ? 123 : 124
+        desktopSwitchQueue.append(contentsOf: repeatElement(keyCode, count: abs(distance)))
+        pendingDesktopSwitchID = desktop.id
+        desktopSwitchGeneration += 1
+
+        guard !desktopSwitchInProgress else { return }
+        desktopSwitchInProgress = true
+        postNextDesktopSwitchEvent()
+    }
+
+    private func postNextDesktopSwitchEvent() {
+        guard !desktopSwitchQueue.isEmpty else {
+            desktopSwitchInProgress = false
+            let generation = desktopSwitchGeneration
+            let targetID = pendingDesktopSwitchID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self, self.desktopSwitchGeneration == generation else { return }
+                self.refreshInternal()
+                if let targetID,
+                   self.desktops.first(where: { $0.id == targetID })?.isCurrent != true {
+                    self.switchToDesktopUsingSwipe(targetID: targetID, generation: generation)
+                } else {
+                    self.pendingDesktopSwitchID = nil
+                }
+            }
+            return
+        }
+
+        let keyCode = desktopSwitchQueue.removeFirst()
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard let controlDown = CGEvent(keyboardEventSource: source, virtualKey: 59, keyDown: true),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false),
+              let controlUp = CGEvent(keyboardEventSource: source, virtualKey: 59, keyDown: false) else {
+            desktopSwitchQueue.removeAll()
+            desktopSwitchInProgress = false
+            pendingDesktopSwitchID = nil
+            desktopSwitchGeneration += 1
             HUDOverlay.shared.show(message: "Cannot create keyboard event", icon: "exclamationmark.triangle")
             return
         }
-        
+
+        controlDown.flags = .maskControl
         keyDown.flags = .maskControl
         keyUp.flags = .maskControl
-        
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-        
-        // Refresh after a short delay to let the space switch complete.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.refreshInternal()
+        controlUp.flags = []
+        controlDown.post(tap: .cghidEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            keyDown.post(tap: .cghidEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                keyUp.post(tap: .cghidEventTap)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    controlUp.post(tap: .cghidEventTap)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                        self?.postNextDesktopSwitchEvent()
+                    }
+                }
+            }
         }
+    }
+
+    private func switchToDesktopUsingSwipe(targetID: Int64, generation: Int) {
+        guard let target = desktops.first(where: { $0.id == targetID }) else {
+            pendingDesktopSwitchID = nil
+            HUDOverlay.shared.show(message: "The selected desktop is no longer available", icon: "exclamationmark.triangle")
+            return
+        }
+
+        let displaySpaces = desktops.filter { $0.displayIndex == target.displayIndex }
+        guard let targetPosition = displaySpaces.firstIndex(where: { $0.id == targetID }),
+              let currentDesktop = displaySpaces.first(where: { $0.isCurrent }),
+              let currentPosition = displaySpaces.firstIndex(where: { $0.id == currentDesktop.id }) else {
+            pendingDesktopSwitchID = nil
+            HUDOverlay.shared.show(message: "Cannot determine the current desktop", icon: "exclamationmark.triangle")
+            return
+        }
+
+        let distance = targetPosition - currentPosition
+        guard distance != 0 else {
+            pendingDesktopSwitchID = nil
+            return
+        }
+
+        guard let eventTypeField = CGEventField(rawValue: 55),
+              let gestureTypeField = CGEventField(rawValue: 110),
+              let swipeMotionField = CGEventField(rawValue: 123),
+              let swipeProgressField = CGEventField(rawValue: 124),
+              let swipeVelocityField = CGEventField(rawValue: 129),
+              let gesturePhaseField = CGEventField(rawValue: 132) else {
+            pendingDesktopSwitchID = nil
+            HUDOverlay.shared.show(message: "Desktop switching is unavailable on this macOS version", icon: "exclamationmark.triangle")
+            return
+        }
+
+        let originalCursorLocation = CGEvent(source: nil)?.location
+        let targetPoint = CGPoint(x: target.displayBounds.midX, y: target.displayBounds.midY)
+        if !target.displayBounds.isEmpty,
+           let originalCursorLocation,
+           !target.displayBounds.contains(originalCursorLocation),
+           CGWarpMouseCursorPosition(targetPoint) != .success {
+            pendingDesktopSwitchID = nil
+            HUDOverlay.shared.show(message: "Could not focus the selected display", icon: "exclamationmark.triangle")
+            return
+        }
+
+        guard let event = CGEvent(source: nil) else {
+            if let originalCursorLocation { CGWarpMouseCursorPosition(originalCursorLocation) }
+            pendingDesktopSwitchID = nil
+            HUDOverlay.shared.show(message: "Could not create a desktop-switch event", icon: "exclamationmark.triangle")
+            return
+        }
+
+        let direction = distance > 0 ? 1.0 : -1.0
+        event.setIntegerValueField(eventTypeField, value: 30)
+        event.setIntegerValueField(gestureTypeField, value: 23)
+        event.setIntegerValueField(swipeMotionField, value: 1)
+        event.setDoubleValueField(swipeProgressField, value: direction)
+        event.setDoubleValueField(swipeVelocityField, value: direction * 9999)
+
+        func postSwipeStep(_ remaining: Int) {
+            event.setIntegerValueField(gesturePhaseField, value: 1)
+            event.post(tap: .cgSessionEventTap)
+            event.setIntegerValueField(gesturePhaseField, value: 4)
+            event.post(tap: .cgSessionEventTap)
+
+            if remaining > 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    postSwipeStep(remaining - 1)
+                }
+                return
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                if let originalCursorLocation { CGWarpMouseCursorPosition(originalCursorLocation) }
+                guard let self, self.desktopSwitchGeneration == generation else { return }
+                self.refreshInternal()
+                if self.desktops.first(where: { $0.id == targetID })?.isCurrent != true {
+                    HUDOverlay.shared.show(message: "macOS did not switch to the selected desktop", icon: "exclamationmark.triangle")
+                }
+                self.pendingDesktopSwitchID = nil
+            }
+        }
+
+        postSwipeStep(abs(distance))
     }
     
     /// Cached app icon for a bundle id / app name.
@@ -577,4 +709,5 @@ public class DesktopManager: ObservableObject {
 
 typealias SLSMainConnectionIDFn = @convention(c) () -> Int32
 typealias SLSCopyManagedDisplaySpacesFn = @convention(c) (Int32) -> Unmanaged<CFArray>?
+typealias SLSManagedDisplayGetCurrentSpaceFn = @convention(c) (Int32, CFString) -> UInt64
 typealias SLSCopyWindowsWithOptionsAndTagsFn = @convention(c) (Int32, UInt32, CFArray, UInt32, UnsafeMutablePointer<UInt64>, UnsafeMutablePointer<UInt64>) -> Unmanaged<CFArray>?

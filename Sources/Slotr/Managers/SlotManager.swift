@@ -22,12 +22,15 @@ public class SlotManager: ObservableObject {
     // MARK: - Persistence
     
     public func loadSlots() {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
         // 1. Try loading from UserDefaults first (always accessible on macOS)
         let savedData = UserDefaults.standard.data(forKey: "slotr_saved_slots") ?? UserDefaults.standard.data(forKey: "macsnap_saved_slots")
         if let data = savedData,
-           let decoded = try? JSONDecoder().decode([LayoutSlot].self, from: data),
-           decoded.count == 8 {
-            self.slots = decoded
+           let decoded = try? decoder.decode([LayoutSlot].self, from: data) {
+            self.slots = decoded.filter { !$0.isEmpty }
+            saveSlots()
             return
         }
         
@@ -35,18 +38,16 @@ public class SlotManager: ObservableObject {
         do {
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let data = try Data(contentsOf: fileURL)
-                let decoded = try JSONDecoder().decode([LayoutSlot].self, from: data)
-                if decoded.count == 8 {
-                    self.slots = decoded
-                    return
-                }
+                let decoded = try decoder.decode([LayoutSlot].self, from: data)
+                self.slots = decoded.filter { !$0.isEmpty }
+                saveSlots()
+                return
             }
         } catch {
             print("Slotr: Could not load slots from file: \(error)")
         }
         
-        // Default 8 empty slots
-        self.slots = (1...8).map { LayoutSlot(id: $0) }
+        self.slots = []
         saveSlots()
     }
     
@@ -72,6 +73,31 @@ public class SlotManager: ObservableObject {
     public func slot(for id: Int) -> LayoutSlot? {
         slots.first(where: { $0.id == id })
     }
+
+    public func nextSlotID() -> Int? {
+        let usedIDs = Set(slots.map(\.id))
+        var candidate = 1
+        while usedIDs.contains(candidate) {
+            guard candidate < Int.max else { return nil }
+            candidate += 1
+        }
+        return candidate
+    }
+
+    @discardableResult
+    public func moveSlot(id: Int, before destinationID: Int) -> Bool {
+        guard let sourceIndex = slots.firstIndex(where: { $0.id == id }),
+              let destinationIndex = slots.firstIndex(where: { $0.id == destinationID }),
+              sourceIndex != destinationIndex else {
+            return false
+        }
+
+        let slot = slots.remove(at: sourceIndex)
+        let insertionIndex = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
+        slots.insert(slot, at: insertionIndex)
+        saveSlots()
+        return true
+    }
     
     @discardableResult
     public func saveCurrentLayout(to slotId: Int) -> Bool {
@@ -88,7 +114,18 @@ public class SlotManager: ObservableObject {
     /// Shared by the on-screen capture path and the desktop "Slot It" path.
     @discardableResult
     public func storeWindows(_ windows: [SavedWindow], to slotId: Int, hudMessage: String) -> Bool {
-        guard let index = slots.firstIndex(where: { $0.id == slotId }) else { return false }
+        guard slotId > 0 else { return false }
+        guard !windows.isEmpty else {
+            HUDOverlay.shared.show(message: "No windows to save", icon: "macwindow")
+            return false
+        }
+        let index: Int
+        if let existingIndex = slots.firstIndex(where: { $0.id == slotId }) {
+            index = existingIndex
+        } else {
+            slots.append(LayoutSlot(id: slotId))
+            index = slots.count - 1
+        }
         
         let screen = NSScreen.main ?? NSScreen.screens.first
         let sWidth = screen?.frame.width ?? 0
@@ -113,11 +150,6 @@ public class SlotManager: ObservableObject {
             to: slotId,
             hudMessage: "\(desktopLabel) → Slot \(slotId) (\(windows.count) Windows)"
         )
-    }
-    
-    /// ID of the first empty slot, or nil when all 8 are in use.
-    public func firstEmptySlotID() -> Int? {
-        slots.first(where: { $0.isEmpty })?.id
     }
     
     /// Captures the frames of all on-screen app windows via Accessibility.
@@ -275,12 +307,12 @@ public class SlotManager: ObservableObject {
     
     public func clearSlot(slotId: Int) {
         guard let index = slots.firstIndex(where: { $0.id == slotId }) else { return }
-        slots[index].windows = []
-        slots[index].updatedAt = nil
-        slots[index].screenWidth = nil
-        slots[index].screenHeight = nil
+        slots.remove(at: index)
+        if editingSlotId == slotId {
+            cancelEditing()
+        }
         saveSlots()
-        HUDOverlay.shared.show(message: "Cleared Slot \(slotId)", icon: "trash")
+        HUDOverlay.shared.show(message: "Removed Slot \(slotId)", icon: "trash")
     }
     
     public func renameSlot(slotId: Int, newName: String) {

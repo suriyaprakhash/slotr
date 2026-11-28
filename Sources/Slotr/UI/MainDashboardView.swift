@@ -2,7 +2,7 @@ import SwiftUI
 import ApplicationServices
 
 public enum DashboardTab: String, CaseIterable, Identifiable {
-    case workspaces = "Workspaces"
+    case workspaces = "Workspace"
     case quickSnap = "Quick Snap"
     case shortcuts = "Shortcuts"
     case settings = "Settings"
@@ -20,7 +20,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
     
     var pageTitle: String {
         switch self {
-        case .workspaces: return "Workspaces & Live Spaces"
+        case .workspaces: return "Workspace"
         case .quickSnap: return "Quick Snap Studio"
         case .shortcuts: return "Global Shortcuts"
         case .settings: return "Settings"
@@ -43,11 +43,12 @@ public class DashboardViewModel: ObservableObject {
     @Published public var selectedTab: DashboardTab = .workspaces
     @Published public var selectedDesktopID: Int64? = nil
     @Published public var selectedFilmWindowID: CGWindowID? = nil
-    @Published public var filmRollSelectedOnly: Bool = false
-    @Published public var showingMenuBarPreview: Bool = false
+    @Published public var filmRollSelectedOnly: Bool = true
+    @Published public var hoveredSavedSlotID: Int? = nil
     @Published public var hoveredSnapZone: SnapZone? = nil
     @Published public var hoveredCardZone: SnapZone? = nil
     @Published public var stageSnapZone: SnapZone = .leftHalf
+    @Published public var slotSearchText: String = ""
     
     private init() {}
 }
@@ -68,6 +69,10 @@ public struct MainDashboardView: View {
     private var filledSlotCount: Int {
         slotManager.slots.filter { !$0.isEmpty }.count
     }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+    }
     
     private var selectedDesktop: DesktopInfo? {
         if let id = dashboardVM.selectedDesktopID,
@@ -75,6 +80,21 @@ public struct MainDashboardView: View {
             return match
         }
         return desktopManager.desktops.first(where: { $0.isCurrent }) ?? desktopManager.desktops.first
+    }
+
+    private var selectedDesktopPosition: Int? {
+        guard let selectedDesktop else { return nil }
+        return desktopManager.desktops.firstIndex(where: { $0.id == selectedDesktop.id })
+    }
+
+    private var filteredSlots: [LayoutSlot] {
+        let query = dashboardVM.slotSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedSlots = slotManager.slots.filter { !$0.isEmpty }
+        guard !query.isEmpty else { return savedSlots }
+        return savedSlots.filter { slot in
+            slot.name.localizedCaseInsensitiveContains(query)
+                || slot.windows.contains { $0.appName.localizedCaseInsensitiveContains(query) }
+        }
     }
     
     private var allDesktopWindows: [(window: DesktopWindow, spaceOrdinal: Int, displayBounds: CGRect)] {
@@ -93,7 +113,7 @@ public struct MainDashboardView: View {
     public var body: some View {
         HStack(spacing: 0) {
             sidebarView
-                .frame(width: 236)
+                .frame(width: 300)
                 .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
             
             Rectangle()
@@ -128,15 +148,6 @@ public struct MainDashboardView: View {
     
     private var sidebarView: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Traffic light row + version tag
-            HStack {
-                Spacer()
-                Text("v1.0")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.75))
-            }
-            .padding(.top, 12)
-            
             // App Identity Header
             HStack(spacing: 10) {
                 SlotrLogoMark(size: 36)
@@ -150,19 +161,21 @@ public struct MainDashboardView: View {
                         .foregroundColor(.secondary)
                 }
             }
+            .padding(.top, 12)
             .padding(.bottom, 4)
             
             // Sidebar Navigation
             VStack(spacing: 3) {
-                ForEach(DashboardTab.allCases) { tab in
+                ForEach([DashboardTab.workspaces]) { tab in
                     sidebarNavButton(for: tab)
                 }
             }
             
-            Spacer(minLength: 10)
-            
-            // Target Window Inspector Card
-            targetWindowInspectorCard
+            if dashboardVM.selectedTab == .workspaces {
+                savedLayoutsSidebar
+            } else {
+                Spacer(minLength: 10)
+            }
             
             // Accessibility Status Banner
             accessibilityFooterCard
@@ -189,7 +202,7 @@ public struct MainDashboardView: View {
                 Spacer()
                 
                 if tab == .workspaces {
-                    Text("\(filledSlotCount)/8")
+                    Text("\(filledSlotCount) Saved")
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                         .foregroundColor(isSelected ? .white : .secondary)
                         .padding(.horizontal, 7)
@@ -198,10 +211,6 @@ public struct MainDashboardView: View {
                             Capsule()
                                 .fill(isSelected ? Color.white.opacity(0.22) : Color.slotrSubtleSurface(colorScheme))
                         )
-                } else if tab == .quickSnap {
-                    Text("⌃⌥←")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(isSelected ? .white.opacity(0.85) : .secondary.opacity(0.75))
                 }
             }
             .padding(.horizontal, 10)
@@ -213,6 +222,276 @@ public struct MainDashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var savedLayoutsSidebar: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Text("SAVED LAYOUTS")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.45)
+                    .foregroundColor(.secondary)
+                Text("\(filledSlotCount)")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.slotrSubtleSurface(colorScheme)))
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                TextField("Search layouts or apps…", text: $dashboardVM.slotSearchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                if !dashboardVM.slotSearchText.isEmpty {
+                    Button {
+                        dashboardVM.slotSearchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.slotrSubtleSurface(colorScheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+            )
+
+            ScrollView {
+                LazyVStack(spacing: 7) {
+                    if filteredSlots.isEmpty {
+                        Text(dashboardVM.slotSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             ? "No saved layouts yet. Save a desktop to add one."
+                             : "No layouts match your search.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(filteredSlots) { slot in
+                            savedLayoutSidebarRow(slot)
+                        }
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    private func savedLayoutSidebarRow(_ slot: LayoutSlot) -> some View {
+        let isHovered = dashboardVM.hoveredSavedSlotID == slot.id
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .help("Drag to reorder")
+
+                if !slot.isEmpty {
+                    MiniLayoutPreview(
+                        frames: slot.windows.map { CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) },
+                        referenceSize: slotReferenceSize(for: slot),
+                        variant: slot.id,
+                        cornerRadius: 5
+                    )
+                    .frame(width: 40, height: 28)
+                } else {
+                    Text("\(slot.id)")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .frame(width: 40, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.slotrSubtleSurface(colorScheme))
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Group {
+                        if slotManager.editingSlotId == slot.id {
+                            TextField("Layout name", text: $slotManager.editingName, onCommit: {
+                                slotManager.commitEditing()
+                            })
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                        } else {
+                            Text(slot.name)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                                .onTapGesture(count: 2) {
+                                    slotManager.startEditing(slot: slot)
+                                }
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        if !slot.isEmpty {
+                            ForEach(Array(slot.windows.prefix(3).enumerated()), id: \.offset) { _, window in
+                                Image(nsImage: desktopManager.icon(bundleId: window.bundleId, appName: window.appName))
+                                    .resizable()
+                                    .frame(width: 13, height: 13)
+                                    .cornerRadius(3)
+                                    .help(window.appName)
+                            }
+                        }
+                        Text(slot.isEmpty ? "Empty preset" : "\(slot.windows.count) windows")
+                            .font(.system(size: 9.5))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        if slot.id <= 8 {
+                            MacKeycapBadge("⌃⌥\(slot.id)", compact: true)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 2)
+
+                Button {
+                    if slot.isEmpty {
+                        saveSelectedDesktop(to: slot)
+                    } else {
+                        slotManager.restoreLayout(from: slot.id)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: slot.isEmpty ? "square.and.arrow.down" : "bolt.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(slot.isEmpty ? "Save" : "Recall")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(slot.isEmpty ? .primary : .white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(slot.isEmpty ? Color.slotrSubtleSurface(colorScheme) : Color.slotrBlue)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(slot.isEmpty ? "Save selected desktop to Slot \(slot.id)" : "Recall Slot \(slot.id)")
+            }
+
+            if isHovered {
+                VStack(alignment: .leading, spacing: 5) {
+                    Divider()
+                    HStack(spacing: 6) {
+                        Label(slot.formattedDate, systemImage: "clock")
+                        Spacer(minLength: 4)
+                        if let width = slot.screenWidth, let height = slot.screenHeight {
+                            Text("\(Int(width)) × \(Int(height))")
+                        }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                    ForEach(Array(slot.windows.prefix(4).enumerated()), id: \.offset) { _, window in
+                        HStack(spacing: 5) {
+                            Image(systemName: "macwindow")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                            Text(window.appName)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.primary)
+                            if !window.windowTitle.isEmpty && window.windowTitle != window.appName {
+                                Text(window.windowTitle)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+
+                    if slot.windows.count > 4 {
+                        Text("+\(slot.windows.count - 4) more windows")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.leading, 48)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.slotrCardBg(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(slot.isEmpty ? Color.slotrBorder(colorScheme) : Color.slotrBlue.opacity(0.35), lineWidth: 1)
+        )
+        .contextMenu {
+            Button("Rename Layout") {
+                slotManager.startEditing(slot: slot)
+            }
+            Button(slot.isEmpty ? "Save Selected Desktop" : "Overwrite with Selected Desktop") {
+                saveSelectedDesktop(to: slot)
+            }
+            if !slot.isEmpty {
+                Button("Recall Layout") {
+                    slotManager.restoreLayout(from: slot.id)
+                }
+                Button("Clear Layout", role: .destructive) {
+                    slotManager.clearSlot(slotId: slot.id)
+                }
+            }
+        }
+        .draggable(String(slot.id))
+        .dropDestination(for: String.self) { draggedIDs, _ in
+            guard let draggedID = draggedIDs.first.flatMap(Int.init) else { return false }
+            return slotManager.moveSlot(id: draggedID, before: slot.id)
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.18)) {
+                if hovering {
+                    dashboardVM.hoveredSavedSlotID = slot.id
+                } else if dashboardVM.hoveredSavedSlotID == slot.id {
+                    dashboardVM.hoveredSavedSlotID = nil
+                }
+            }
+        }
+    }
+
+    private func slotReferenceSize(for slot: LayoutSlot) -> CGSize? {
+        guard let width = slot.screenWidth, let height = slot.screenHeight,
+              width > 100, height > 100 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    private func saveSelectedDesktop(to slot: LayoutSlot) {
+        if let desktop = selectedDesktop, !desktop.isEmpty {
+            desktopManager.saveDesktop(desktop, toSlotId: slot.id)
+        } else {
+            slotManager.saveCurrentLayout(to: slot.id)
+        }
+    }
+
+    private func saveSelectedDesktopAsNewLayout() {
+        guard let slotID = slotManager.nextSlotID() else {
+            HUDOverlay.shared.show(message: "Unable to create another workspace", icon: "exclamationmark.triangle")
+            return
+        }
+        if let desktop = selectedDesktop, !desktop.isEmpty {
+            desktopManager.saveDesktop(desktop, toSlotId: slotID)
+        } else {
+            slotManager.saveCurrentLayout(to: slotID)
+        }
     }
     
     // MARK: - Target Window Inspector Card (Sidebar)
@@ -443,173 +722,218 @@ public struct MainDashboardView: View {
     
     private var topToolbar: some View {
         HStack(spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(dashboardVM.selectedTab.pageTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.primary)
-                
-                Text("— \(dashboardVM.selectedTab.pageSubtitle)")
-                    .font(.system(size: 12))
+            Text(dashboardVM.selectedTab.pageTitle)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.primary)
+
+            if dashboardVM.selectedTab == .workspaces, let desktop = selectedDesktop {
+                Text(desktopPositionLabel(desktop))
+                    .font(.system(size: 11.5))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
             
             Spacer()
+
+            toolbarTabButton(.shortcuts)
+            toolbarTabButton(.settings)
             
             Button(action: {
-                windowManager.refreshTargetWindow()
-                dashboardVM.showingMenuBarPreview.toggle()
+                NSApp.appearance = NSAppearance(named: colorScheme == .dark ? .aqua : .darkAqua)
             }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "rectangle.split.2x1.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(.slotrBlue)
-                    Text("Menu Bar Preview")
-                        .font(.system(size: 12, weight: .medium))
+                HStack(spacing: 5) {
+                    Image(systemName: colorScheme == .dark ? "sun.max.fill" : "moon.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.slotrSkyDeep)
+                    Text(colorScheme == .dark ? "Light" : "Dark")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.primary)
                 }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.slotrCardBg(colorScheme))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(
-                            dashboardVM.showingMenuBarPreview ? Color.orange.opacity(0.8) : Color.slotrBorder(colorScheme),
-                            lineWidth: dashboardVM.showingMenuBarPreview ? 1.5 : 1
-                        )
-                )
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.slotrBorder(colorScheme), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $dashboardVM.showingMenuBarPreview, arrowEdge: .bottom) {
-                MenuBarView(isPreview: true) {
-                    dashboardVM.showingMenuBarPreview = false
-                }
-            }
         }
         .padding(.horizontal, 20)
         .frame(height: 52)
+    }
+
+    private func toolbarTabButton(_ tab: DashboardTab) -> some View {
+        Button {
+            dashboardVM.selectedTab = tab
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: tab.iconName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.slotrBlue)
+                Text(tab.rawValue)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundColor(.primary)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.slotrCardBg(colorScheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
     
     // MARK: - Tab 1: Workspaces & Live Spaces
     
     private var workspacesTabContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Section 1: Current Desktops
-            currentDesktopsSection
-            
-            // Section 2: Target Windows Film Roll
+        VStack(alignment: .leading, spacing: 14) {
+            activeDesktopStageSection
             targetWindowsFilmRollSection
-            
-            // Section 3: 8 Workspace Layout Slots
-            workspaceSlotsGridSection
+            workspaceSnapSection
         }
     }
     
-    private var currentDesktopsSection: some View {
+    private var activeDesktopStageSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ScrollViewReader { proxy in
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 8) {
-                            Text("Current Desktops")
-                                .font(.system(size: 13.5, weight: .semibold))
-                            
-                            Text("\(desktopManager.desktops.count) Desktops")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundColor(.slotrBlue)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.slotrBlue.opacity(colorScheme == .dark ? 0.18 : 0.11))
-                                .cornerRadius(99)
-                        }
-                        
-                        Text("Click a Desktop to inspect its windows. Double-click to switch to that Space.")
-                            .font(.system(size: 11.5))
-                            .foregroundColor(.secondary)
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(selectedDesktop?.isCurrent == true ? Color.slotrBlue : Color.green)
+                            .frame(width: 6, height: 6)
+                        Text(selectedDesktop.map(desktopPositionLabel) ?? "Finding desktops…")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
                     }
-                    
-                    Spacer()
-                    
-                    HStack(spacing: 8) {
-                        Button(action: {
-                            if let desktop = selectedDesktop {
-                                desktopManager.slotIt(desktop)
-                            }
-                        }) {
-                            Text("+ Capture Selected Desktop")
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 5.5)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(Color.slotrCardBg(colorScheme))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(selectedDesktop?.isEmpty ?? true)
-                        
-                        carouselStepButtons(
-                            onPrev: {
-                                if let first = desktopManager.desktops.first {
-                                    withAnimation(.easeInOut(duration: 0.25)) {
-                                        proxy.scrollTo(first.id, anchor: .leading)
-                                    }
-                                }
-                            },
-                            onNext: {
-                                if let last = desktopManager.desktops.last {
-                                    withAnimation(.easeInOut(duration: 0.25)) {
-                                        proxy.scrollTo(last.id, anchor: .trailing)
-                                    }
-                                }
-                            }
-                        )
-                    }
+                    Text("\(selectedDesktop?.windows.count ?? 0) windows · Click any window below to target")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
                 }
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        if desktopManager.desktops.isEmpty {
-                            HStack(spacing: 8) {
-                                Image(systemName: "square.on.square")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
-                                Text(desktopManager.isAvailable
-                                     ? "Detecting Desktops…"
-                                     : "Desktop Detection Unavailable")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 30)
-                            .padding(.horizontal, 16)
-                        } else {
-                            ForEach(desktopManager.desktops) { desktop in
-                                DesktopCardView(
-                                    desktop: desktop,
-                                    isSelected: selectedDesktop?.id == desktop.id,
-                                    onSelect: {
-                                        dashboardVM.selectedDesktopID = desktop.id
-                                    },
-                                    onNavigate: {
-                                        desktopManager.switchToDesktop(desktop)
-                                    }
-                                )
-                                .id(desktop.id)
-                            }
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 7) {
+                    Button {
+                        if let selectedDesktop {
+                            desktopManager.switchToDesktop(selectedDesktop)
                         }
+                    } label: {
+                        Label("View", systemImage: "eye")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.slotrSubtleSurface(colorScheme))
+                            )
                     }
-                    .padding(.vertical, 2)
+                    .buttonStyle(.plain)
+                    .disabled(selectedDesktop == nil)
+                    .help("Switch to this macOS desktop")
+
+                    Button(action: saveSelectedDesktopAsNewLayout) {
+                        Label("Slot", systemImage: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.slotrBlue)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help("Save this desktop as a new slot")
                 }
             }
+
+            HStack(spacing: 10) {
+                desktopStageArrow(direction: .leading)
+                    .disabled((selectedDesktopPosition ?? 0) <= 0)
+                    .opacity((selectedDesktopPosition ?? 0) <= 0 ? 0.45 : 1)
+
+                Group {
+                    if let desktop = selectedDesktop {
+                        MiniLayoutPreview(
+                            frames: desktop.windows.map(\.frame),
+                            referenceBounds: desktop.displayBounds,
+                            variant: desktop.index,
+                            cornerRadius: 8
+                        )
+                    } else {
+                        ZStack {
+                            Color.slotrSubtleSurface(colorScheme)
+                            Text(desktopManager.isAvailable ? "No desktop available" : "Desktop detection unavailable")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 214)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+                )
+
+                desktopStageArrow(direction: .trailing)
+                    .disabled((selectedDesktopPosition ?? -1) >= desktopManager.desktops.count - 1)
+                    .opacity((selectedDesktopPosition ?? -1) >= desktopManager.desktops.count - 1 ? 0.45 : 1)
+            }
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.slotrCardBg(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+        )
+    }
+
+    private func desktopStageArrow(direction: HorizontalEdge) -> some View {
+        Button {
+            selectAdjacentDesktop(direction == .leading ? -1 : 1)
+        } label: {
+            Image(systemName: direction == .leading ? "chevron.left" : "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.primary)
+                .frame(width: 36, height: 42)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.slotrSubtleSurface(colorScheme))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(direction == .leading ? "Previous desktop" : "Next desktop")
+    }
+
+    private func selectAdjacentDesktop(_ offset: Int) {
+        guard let currentPosition = selectedDesktopPosition else { return }
+        let nextPosition = currentPosition + offset
+        guard desktopManager.desktops.indices.contains(nextPosition) else { return }
+        let nextDesktop = desktopManager.desktops[nextPosition]
+        withAnimation(.easeInOut(duration: 0.25)) {
+            dashboardVM.selectedDesktopID = nextDesktop.id
+        }
+    }
+
+    private func desktopPositionLabel(_ desktop: DesktopInfo) -> String {
+        let displayLabel = desktop.isMultiDisplay ? " · Display \(desktop.displayIndex + 1)" : ""
+        return "Desktop \(desktop.index + 1) of \(desktopManager.desktops.count)\(displayLabel)"
     }
     
     private var targetWindowsFilmRollSection: some View {
@@ -617,7 +941,7 @@ public struct MainDashboardView: View {
             ScrollViewReader { proxy in
                 HStack(alignment: .center) {
                     HStack(spacing: 8) {
-                        Text("Target Windows Film Roll")
+                        Text("Select Target Window")
                             .font(.system(size: 13.5, weight: .semibold))
                         
                         Text("\(filteredFilmWindows.count) Windows")
@@ -632,14 +956,13 @@ public struct MainDashboardView: View {
                     Spacer()
                     
                     HStack(spacing: 8) {
-                        // All Spaces vs Selected Desktop Only segmented pill
+                        // This Desktop vs All Spaces segmented pill
                         HStack(spacing: 2) {
+                            filterSegmentButton(title: "This Desktop", active: dashboardVM.filmRollSelectedOnly) {
+                                dashboardVM.filmRollSelectedOnly = true
+                            }
                             filterSegmentButton(title: "All Spaces", active: !dashboardVM.filmRollSelectedOnly) {
                                 dashboardVM.filmRollSelectedOnly = false
-                            }
-                            let label = selectedDesktop.map { "Desktop \($0.index + 1) Only" } ?? "Selected Only"
-                            filterSegmentButton(title: label, active: dashboardVM.filmRollSelectedOnly) {
-                                dashboardVM.filmRollSelectedOnly = true
                             }
                         }
                         .padding(3)
@@ -698,49 +1021,120 @@ public struct MainDashboardView: View {
     }
     
     private func isFilmWindowSelected(_ w: DesktopWindow) -> Bool {
-        if let selectedFilmWindowID = dashboardVM.selectedFilmWindowID {
-            return selectedFilmWindowID == w.id
+        guard let target = windowManager.targetWindowDetails else {
+            return dashboardVM.selectedFilmWindowID == w.id
         }
-        if let target = windowManager.targetWindowDetails {
-            return target.bundleId == w.bundleId && (target.title == w.windowName || target.title.isEmpty)
+        guard target.bundleId == w.bundleId,
+              target.title.isEmpty || w.windowName.isEmpty || target.title == w.windowName else {
+            return false
         }
-        return false
+
+        let matchingWindows = filteredFilmWindows.filter { item in
+            item.window.bundleId == target.bundleId
+                && (target.title.isEmpty || item.window.windowName.isEmpty || target.title == item.window.windowName)
+        }
+        if matchingWindows.count == 1 {
+            return matchingWindows[0].window.id == w.id
+        }
+
+        let tolerance: CGFloat = 8
+        return abs(target.frame.minX - w.frame.minX) <= tolerance
+            && abs(target.frame.minY - w.frame.minY) <= tolerance
+            && abs(target.frame.width - w.frame.width) <= tolerance
+            && abs(target.frame.height - w.frame.height) <= tolerance
     }
-    
-    private var workspaceSlotsGridSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("8 Workspace Layout Slots")
-                        .font(.system(size: 13.5, weight: .semibold))
-                    
-                    HStack(spacing: 4) {
-                        Text("Click Recall or press")
-                            .font(.system(size: 11.5))
-                            .foregroundColor(.secondary)
-                        MacKeycapBadge("⌃⌥1–8", compact: true)
-                        Text("to restore all apps and window positions.")
-                            .font(.system(size: 11.5))
-                            .foregroundColor(.secondary)
-                    }
+
+    private var workspaceSnapSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Text("Snap & Tile Focused Window")
+                    .font(.system(size: 12.5, weight: .semibold))
+                if let target = windowManager.targetWindowDetails {
+                    Text("\(target.appName) · Desktop \(selectedDesktop.map { $0.index + 1 } ?? 1)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.slotrBlue)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.slotrBlue.opacity(colorScheme == .dark ? 0.18 : 0.10))
+                        )
                 }
-                
                 Spacer()
-                
-                Text("Double-click any slot name to rename")
-                    .font(.system(size: 11))
+                Text("Hover to preview · Click to snap")
+                    .font(.system(size: 9.5))
                     .foregroundColor(.secondary)
             }
-            
+
             LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                spacing: 12
+                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8),
+                spacing: 6
             ) {
-                ForEach(slotManager.slots) { slot in
-                    SlotCardView(slot: slot, selectedDesktop: selectedDesktop)
+                ForEach(SnapZone.allCases) { zone in
+                    Button {
+                        windowManager.snapActiveWindow(to: zone)
+                        dashboardVM.stageSnapZone = zone
+                    } label: {
+                        SnapZoneDiagram(
+                            zone: zone,
+                            width: 23,
+                            height: 15,
+                            isActive: windowManager.targetWindowDetails?.lastZone == zone
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.slotrCardBg(colorScheme))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(
+                                    windowManager.targetWindowDetails?.lastZone == zone
+                                        ? Color.slotrBlue.opacity(0.75)
+                                        : Color.slotrBorder(colorScheme),
+                                    lineWidth: 1
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(zone.title)
+                    .onHover { hovering in
+                        dashboardVM.hoveredSnapZone = hovering ? zone : nil
+                    }
                 }
+
+                Button {
+                    windowManager.restoreOriginalWindowSize()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.slotrCardBg(colorScheme))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Restore original window size and position (⌃⌥↓)")
             }
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.slotrCardBg(colorScheme))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.slotrBorder(colorScheme), lineWidth: 1)
+        )
     }
     
     private func filterSegmentButton(title: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -758,8 +1152,13 @@ public struct MainDashboardView: View {
         }
         .buttonStyle(.plain)
     }
-    
-    private func carouselStepButtons(onPrev: @escaping () -> Void, onNext: @escaping () -> Void) -> some View {
+
+    private func carouselStepButtons(
+        onPrev: @escaping () -> Void,
+        onNext: @escaping () -> Void,
+        previousEnabled: Bool = true,
+        nextEnabled: Bool = true
+    ) -> some View {
         HStack(spacing: 4) {
             Button(action: onPrev) {
                 Image(systemName: "chevron.left")
@@ -776,6 +1175,8 @@ public struct MainDashboardView: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(!previousEnabled)
+            .opacity(previousEnabled ? 1 : 0.45)
             
             Button(action: onNext) {
                 Image(systemName: "chevron.right")
@@ -792,6 +1193,8 @@ public struct MainDashboardView: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(!nextEnabled)
+            .opacity(nextEnabled ? 1 : 0.45)
         }
     }
     
@@ -1096,6 +1499,76 @@ public struct MainDashboardView: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("About Slotr")
+                    .font(.system(size: 13.5, weight: .semibold))
+
+                groupedCard {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 12) {
+                            SlotrLogoMark(size: 38)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Slotr")
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                Text("Spaces & Window Snap")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Text("Version \(appVersion)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+
+                        Divider().padding(.horizontal, 14)
+
+                        HStack {
+                            Text("Developer")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("Suriya Prakhash Deenadayalan")
+                                .font(.system(size: 11.5))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+
+                        Divider().padding(.horizontal, 14)
+
+                        HStack {
+                            Text("License")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("MIT License")
+                                .font(.system(size: 11.5))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+
+                        Divider().padding(.horizontal, 14)
+
+                        HStack(spacing: 12) {
+                            Text("More information and latest updates")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Link(destination: URL(string: "https://www.slotr.suriyaprakhash.com")!) {
+                                Label("Visit website", systemImage: "arrow.up.right")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
                 }
             }
         }

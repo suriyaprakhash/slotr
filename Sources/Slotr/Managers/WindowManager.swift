@@ -16,6 +16,13 @@ public class WindowManager: ObservableObject {
     
     @Published public var targetWindowDetails: TargetWindowDetails?
     
+    private struct SelectedTargetWindow {
+        let app: NSRunningApplication
+        let element: AXUIElement
+    }
+    
+    private var selectedTargetWindow: SelectedTargetWindow?
+    
     /// Tracks the application that was active right before Slotr took focus
     public var lastActiveApp: NSRunningApplication?
     
@@ -68,6 +75,7 @@ public class WindowManager: ObservableObject {
     @objc private func didActivateApplication(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         if app.bundleIdentifier != Bundle.main.bundleIdentifier && app.activationPolicy == .regular {
+            selectedTargetWindow = nil
             self.lastActiveApp = app
             self.refreshTargetWindow()
         }
@@ -146,6 +154,12 @@ public class WindowManager: ObservableObject {
     
     public func getTargetWindowElement() -> (app: NSRunningApplication, window: AXUIElement)? {
         guard let app = getTargetApplication() else { return nil }
+        if let selectedTargetWindow,
+           selectedTargetWindow.app.processIdentifier == app.processIdentifier,
+           getWindowFrame(selectedTargetWindow.element) != nil {
+            return (selectedTargetWindow.app, selectedTargetWindow.element)
+        }
+
         let pid = app.processIdentifier
         let appElement = AXUIElementCreateApplication(pid)
         
@@ -172,6 +186,43 @@ public class WindowManager: ObservableObject {
         }
         
         return nil
+    }
+    
+    public func selectTargetWindow(_ target: DesktopWindow) {
+        guard let app = NSRunningApplication(processIdentifier: target.ownerPID),
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            selectedTargetWindow = nil
+            return
+        }
+        
+        lastActiveApp = app
+        let appElement = AXUIElementCreateApplication(target.ownerPID)
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement],
+              !windows.isEmpty else {
+            selectedTargetWindow = nil
+            refreshTargetWindow()
+            return
+        }
+        
+        let titleMatches = windows.filter { getWindowTitle($0) == target.windowName }
+        let selected = titleMatches.first(where: { frameMatches(getWindowFrame($0), target.frame) })
+            ?? windows.first(where: { frameMatches(getWindowFrame($0), target.frame) })
+            ?? (titleMatches.count == 1 ? titleMatches.first : nil)
+            ?? (windows.indices.contains(target.windowIndex) ? windows[target.windowIndex] : nil)
+        
+        selectedTargetWindow = selected.map { SelectedTargetWindow(app: app, element: $0) }
+        refreshTargetWindow()
+    }
+    
+    private func frameMatches(_ frame: CGRect?, _ target: CGRect) -> Bool {
+        guard let frame else { return false }
+        let tolerance: CGFloat = 4
+        return abs(frame.minX - target.minX) <= tolerance
+            && abs(frame.minY - target.minY) <= tolerance
+            && abs(frame.width - target.width) <= tolerance
+            && abs(frame.height - target.height) <= tolerance
     }
     
     public func refreshTargetWindow() {
