@@ -39,7 +39,7 @@ func renderMaster(pixels: Int) -> CGImage? {
     ctx.addPath(clipPath)
     ctx.clip()
     
-    // Keep the bundle icon aligned with SlotrLogoMark in the app.
+    // Keep the bundle icon aligned with the in-app logo mark.
     let colors = [
         NSColor(red: 0.118, green: 0.161, blue: 0.231, alpha: 1.0).cgColor,
         NSColor(red: 0.059, green: 0.090, blue: 0.165, alpha: 1.0).cgColor
